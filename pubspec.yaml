@@ -1,4 +1,4 @@
-name: inapp_download_demo
+name: genuport
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -44,6 +44,7 @@ dependencies:
   syncfusion_flutter_pdf: ^31.1.19
   encrypt: ^5.0.3
   flutter_secure_storage: ^10.0.0
+  receive_sharing_intent: ^1.8.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
