@@ -6,8 +6,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:app_links/app_links.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:path_provider/path_provider.dart';
-import 'screens/applicant_login_page.dart';
-import 'screens/file_manager.dart';
+import 'screens/login_page.dart';
+import 'services/file_manager.dart';
 
 // Global navigator key to navigate from anywhere
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -42,54 +42,54 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _handleIncomingFiles() {
-    print('═══════════════════════════════════════════════');
-    print('🔄 INITIALIZING FILE HANDLER');
-    print('═══════════════════════════════════════════════');
+    debugPrint('═══════════════════════════════════════════════');
+    debugPrint('🔄 INITIALIZING FILE HANDLER');
+    debugPrint('═══════════════════════════════════════════════');
     
     // When app is already running
     ReceiveSharingIntent.instance.getMediaStream().listen(
       (List<SharedMediaFile> files) async {
-        print('═══════════════════════════════════════════════');
-        print('📥 SHARED FILE DETECTED (APP RUNNING)');
-        print('   Files count: ${files.length}');
-        print('═══════════════════════════════════════════════');
+        debugPrint('═══════════════════════════════════════════════');
+        debugPrint('📥 SHARED FILE DETECTED (APP RUNNING)');
+        debugPrint('   Files count: ${files.length}');
+        debugPrint('═══════════════════════════════════════════════');
         if (files.isNotEmpty) {
-          print('📥 Processing: ${files.first.path}');
+          debugPrint('📥 Processing: ${files.first.path}');
           await _handleIncomingPdf(files.first.path);
         }
       },
       onError: (err) {
-        print('❌ Error receiving files: $err');
+        debugPrint('❌ Error receiving files: $err');
       },
     );
 
     // When app is opened from closed state
     ReceiveSharingIntent.instance.getInitialMedia().then((initialFiles) async {
-      print('═══════════════════════════════════════════════');
-      print('📥 SHARED FILE DETECTED (APP CLOSED - COLD START)');
-      print('   Files count: ${initialFiles.length}');
-      print('═══════════════════════════════════════════════');
+      debugPrint('═══════════════════════════════════════════════');
+      debugPrint('📥 SHARED FILE DETECTED (APP CLOSED - COLD START)');
+      debugPrint('   Files count: ${initialFiles.length}');
+      debugPrint('═══════════════════════════════════════════════');
       if (initialFiles.isNotEmpty) {
-        print('📥 Processing initial file: ${initialFiles.first.path}');
+        debugPrint('📥 Processing initial file: ${initialFiles.first.path}');
         await _handleIncomingPdf(initialFiles.first.path);
       }
       // Clear the media after processing
       ReceiveSharingIntent.instance.reset();
     }).catchError((e) {
-      print('❌ Error getting initial media: $e');
+      debugPrint('❌ Error getting initial media: $e');
     });
   }
 
   Future<void> _handleIncomingPdf(String filePath) async {
-    print('═══════════════════════════════════════════════');
-    print('🔐 STARTING PDF PROCESSING');
-    print('═══════════════════════════════════════════════');
-    print('📂 File path: $filePath');
-    print('📌 Navigator key context available: ${navigatorKey.currentContext != null}');
-    print('═══════════════════════════════════════════════');
+    debugPrint('═══════════════════════════════════════════════');
+    debugPrint('🔐 STARTING PDF PROCESSING');
+    debugPrint('═══════════════════════════════════════════════');
+    debugPrint('📂 File path: $filePath');
+    debugPrint('📌 Navigator key context available: ${navigatorKey.currentContext != null}');
+    debugPrint('═══════════════════════════════════════════════');
     
     try {
-      print('🔐 Processing incoming PDF: $filePath');
+      debugPrint('🔐 Processing incoming PDF: $filePath');
       
       // Handle both file:// paths and content:// URIs
       Uint8List bytes;
@@ -97,14 +97,14 @@ class _MyAppState extends State<MyApp> {
       
       if (filePath.startsWith('content://')) {
         // This is a content URI - receive_sharing_intent should have handled it
-        print('📌 Content URI detected: $filePath');
+        debugPrint('📌 Content URI detected: $filePath');
         _showErrorDialog('File path format not supported. Please try again.');
         return;
       }
       
       final file = File(filePath);
       if (!await file.exists()) {
-        print('❌ File does not exist: $filePath');
+        debugPrint('❌ File does not exist: $filePath');
         _showErrorDialog('File not found: $filePath');
         return;
       }
@@ -114,17 +114,17 @@ class _MyAppState extends State<MyApp> {
       
       // Read bytes from the shared file
       bytes = await file.readAsBytes();
-      print('📄 Read ${bytes.length} bytes from file: $fileName');
+      debugPrint('📄 Read ${bytes.length} bytes from file: $fileName');
 
       // Initialize encryption service
       // final encryptionService = EncryptionService();
       // await encryptionService.initialize();
-      // print('🔑 Encryption service initialized');
+      // debugPrint('🔑 Encryption service initialized');
 
       // // 🔒 Encrypt the file using AES-256
-      // print('🔒 Encrypting ${file.path.split('/').last}...');
+      // debugPrint('🔒 Encrypting ${file.path.split('/').last}...');
       // final encryptedBytes = await encryptionService.encryptFile(Uint8List.fromList(bytes));
-      // print('✅ File encrypted (${encryptedBytes.length} bytes)');
+      // debugPrint('✅ File encrypted (${encryptedBytes.length} bytes)');
 
       // Save to app's private storage
       final downloadPath = await FileManager.getDownloadPath();
@@ -132,7 +132,7 @@ class _MyAppState extends State<MyApp> {
 
       if (!await dir.exists()) {
         await dir.create(recursive: true);
-        print('✅ Created Downloads directory: $downloadPath');
+        debugPrint('✅ Created Downloads directory: $downloadPath');
       }
 
       // Generate unique filename with timestamp
@@ -142,11 +142,11 @@ class _MyAppState extends State<MyApp> {
       // Write encrypted bytes to app storage
       final newFile = File(newFilePath);
       // await newFile.writeAsBytes(encryptedBytes);
-      print('✅ File saved to app storage: $newFilePath');
-      print('✅ File size: ${await newFile.length()} bytes');
+      debugPrint('✅ File saved to app storage: $newFilePath');
+      debugPrint('✅ File size: ${await newFile.length()} bytes');
 
       // Wait for the app to be fully initialized before showing UI
-      print('⏳ Waiting for app to be fully initialized...');
+      debugPrint('⏳ Waiting for app to be fully initialized...');
       await Future.delayed(const Duration(milliseconds: 500));
       
       // Show success snackbar using navigator key context
@@ -166,25 +166,25 @@ class _MyAppState extends State<MyApp> {
             duration: const Duration(seconds: 3),
           ),
         );
-        print('✅ Success snackbar shown');
+        debugPrint('✅ Success snackbar shown');
       }
 
       // Decrypt and view the file immediately
       try {
-        print('🔍 Reading encrypted file for viewing...');
-        print('📌 Navigator key context available: ${navigatorKey.currentContext != null}');
+        debugPrint('🔍 Reading encrypted file for viewing...');
+        debugPrint('📌 Navigator key context available: ${navigatorKey.currentContext != null}');
         
         final savedEncrypted = await newFile.readAsBytes();
-        print('📖 Encrypted file size: ${savedEncrypted.length} bytes');
+        debugPrint('📖 Encrypted file size: ${savedEncrypted.length} bytes');
         
-        print('🔓 Decrypting file...');
+        debugPrint('🔓 Decrypting file...');
         // final decryptedBytes = await encryptionService.decryptFile(savedEncrypted);
-        //   print('✅ Decrypted file size: ${decryptedBytes.length} bytes');
+        //   debugPrint('✅ Decrypted file size: ${decryptedBytes.length} bytes');
         
         // // Verify PDF header
         // if (decryptedBytes.length >= 4) {
         //   final header = String.fromCharCodes(decryptedBytes.take(4));
-        //   print('📄 PDF header check: $header');
+        //   debugPrint('📄 PDF header check: $header');
         // }
         
         // Create temp file for viewing
@@ -192,51 +192,51 @@ class _MyAppState extends State<MyApp> {
         final cleanFileName = fileName.replaceAll('.enc', '');
         final tempFile = File('${tempDir.path}/$cleanFileName');
         // await tempFile.writeAsBytes(decryptedBytes);
-        // print('✅ Temp file created: ${tempFile.path} (${decryptedBytes.length} bytes)');
+        // debugPrint('✅ Temp file created: ${tempFile.path} (${decryptedBytes.length} bytes)');
         
         // Navigate to PDF viewer using navigatorKey context
-        print('🎯 Attempting to navigate to PDF viewer...');
+        debugPrint('🎯 Attempting to navigate to PDF viewer...');
         if (navigatorKey.currentContext != null) {
-          print('🚀 Navigator key context available, pushing PdfViewerPage...');
+          debugPrint('🚀 Navigator key context available, pushing PdfViewerPage...');
           // final result = await Navigator.of(navigatorKey.currentContext!).push(
           //   MaterialPageRoute(
           //     builder: (_) => PdfViewerPage(file: tempFile),
           //   ),
           // );
-          // print('👈 Returned from PDF viewer with result: $result');
+          // debugPrint('👈 Returned from PDF viewer with result: $result');
           
           // After viewing, navigate to Downloads page
-          print('📱 Now navigating to Downloads page...');
+          debugPrint('📱 Now navigating to Downloads page...');
           if (navigatorKey.currentContext != null) {
-            print('🎯 Pushing to Downloads page...');
+            debugPrint('🎯 Pushing to Downloads page...');
             // try {
             //   Navigator.of(navigatorKey.currentContext!).pushAndRemoveUntil(
             //     MaterialPageRoute(builder: (_) => const DownloadsPage()),
             //     (route) => route.isFirst,
             //   );
-            //   print('✅ Successfully navigated to Downloads page');
+            //   debugPrint('✅ Successfully navigated to Downloads page');
             // } catch (navError) {
-            //   print('❌ Navigation error: $navError');
-            //   print('❌ Stack trace: $navError');
+            //   debugPrint('❌ Navigation error: $navError');
+            //   debugPrint('❌ Stack trace: $navError');
             // }
           } else {
-            print('⚠️ Navigator context not available at Downloads navigation time');
+            debugPrint('⚠️ Navigator context not available at Downloads navigation time');
           }
           
           // Cleanup temp file
           try {
             await tempFile.delete();
-            print('✅ Temp file cleaned up');
+            debugPrint('✅ Temp file cleaned up');
           } catch (e) {
-            print('⚠️ Failed to cleanup temp file: $e');
+            debugPrint('⚠️ Failed to cleanup temp file: $e');
           }
         } else {
-          print('❌ Navigator key context NOT available - cannot navigate to PDF viewer');
-          print('❌ This is a critical issue with the widget tree initialization');
+          debugPrint('❌ Navigator key context NOT available - cannot navigate to PDF viewer');
+          debugPrint('❌ This is a critical issue with the widget tree initialization');
         }
         } catch (e) {
-          print('❌ Error viewing file: $e');
-          print('❌ Stack trace: ${StackTrace.current}');
+          debugPrint('❌ Error viewing file: $e');
+          debugPrint('❌ Stack trace: ${StackTrace.current}');
           if (navigatorKey.currentContext != null) {
             ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
               SnackBar(
@@ -247,13 +247,13 @@ class _MyAppState extends State<MyApp> {
           }
         }
       } catch (e) {
-        print('❌ Error processing PDF: $e');
+        debugPrint('❌ Error processing PDF: $e');
         _showErrorDialog('Failed to process PDF: $e');
       }
     }
 
   void _showErrorDialog(String message) {
-    print('🚨 Showing error dialog: $message');
+    debugPrint('🚨 Showing error dialog: $message');
     
     // Try using navigator key context first
     if (navigatorKey.currentContext != null) {
@@ -277,7 +277,7 @@ class _MyAppState extends State<MyApp> {
         ),
       );
     } else {
-      print('⚠️ Navigator context not available for error dialog');
+      debugPrint('⚠️ Navigator context not available for error dialog');
     }
   }
 
@@ -310,7 +310,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey, // Use global navigator key
-      home: const ApplicantLoginPage(), // ✅ START HERE
+      home: const LoginPage(), // ✅ START HERE
     );
   }
 }
