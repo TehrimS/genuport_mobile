@@ -38,7 +38,6 @@ class _DownloadsPageState extends State<DownloadsPage> {
 
 Future<List<File>> _getFiles() async {
   Directory dir;
-  
   if (Platform.isAndroid) {
     dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
   } else if (Platform.isIOS) {
@@ -47,17 +46,19 @@ Future<List<File>> _getFiles() async {
   } else {
     return [];
   }
-
   if (!await dir.exists()) return [];
-  
   try {
-    return dir.listSync().whereType<File>().toList()
-      ..sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    return dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.pdf')) // only our encrypted PDFs
+        .toList()
+          ..sort((a, b) =>
+              b.statSync().modified.compareTo(a.statSync().modified));
   } catch (_) {
     return [];
   }
 }
-
   String _formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
@@ -359,7 +360,7 @@ Future<List<File>> _getFiles() async {
     );
   }
 
-  Future<void> _openFile(File file, String displayName, bool isEncrypted) async {
+  Future<void> _openFile(File file, String displayName) async {
     if (!_isPdf(displayName)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Only PDF files can be viewed')),
@@ -370,14 +371,16 @@ Future<List<File>> _getFiles() async {
     _showLoadingDialog('Decrypting…');
 
     try {
-      Uint8List pdfBytes;
+      final fileBytes = await file.readAsBytes();
+      final isEncrypted = _encryptionService.isFileEncrypted(fileBytes);
+
+      Uint8List pdfBytes = fileBytes;
 
       if (isEncrypted) {
         if (!_isInitialized) throw Exception('Encryption service not initialized');
-        final encryptedBytes = await file.readAsBytes();
-        var decryptedBytes = await _encryptionService.decryptFile(encryptedBytes);
+        pdfBytes = await _encryptionService.decryptFile(fileBytes);
 
-        if (PdfUnlocker.isPasswordProtected(decryptedBytes)) {
+        if (PdfUnlocker.isPasswordProtected(pdfBytes)) {
           if (context.mounted) Navigator.pop(context);
 
           final password = await _askPdfPassword();
@@ -385,10 +388,12 @@ Future<List<File>> _getFiles() async {
 
           if (context.mounted) _showLoadingDialog('Unlocking PDF…');
 
-          var unlockedBytes = await PdfUnlocker.unlockPdf(decryptedBytes, password);
+          var unlockedBytes = await PdfUnlocker.unlockPdf(pdfBytes, password);
           unlockedBytes ??= await PdfUnlocker.tryUnlockWithCommonPasswords(
-              decryptedBytes, dob: password, pan: password,
-            );
+            pdfBytes,
+            dob: password,
+            pan: password,
+          );
 
           if (unlockedBytes == null) {
             if (context.mounted) Navigator.pop(context);
@@ -403,16 +408,12 @@ Future<List<File>> _getFiles() async {
             return;
           }
 
-          decryptedBytes = unlockedBytes;
+          pdfBytes = unlockedBytes;
           try {
-            final reEncrypted = await _encryptionService.encryptFile(decryptedBytes);
+            final reEncrypted = await _encryptionService.encryptFile(pdfBytes);
             await file.writeAsBytes(reEncrypted);
           } catch (_) {}
         }
-
-        pdfBytes = decryptedBytes;
-      } else {
-        pdfBytes = await file.readAsBytes();
       }
 
       if (context.mounted) Navigator.pop(context);
@@ -420,7 +421,7 @@ Future<List<File>> _getFiles() async {
       if (context.mounted) {
         await Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => PdfViewerPage(file: file)),
+          MaterialPageRoute(builder: (_) => PdfViewerPage(file: file, bytes: pdfBytes)),
         );
       }
     } catch (e) {
@@ -692,7 +693,7 @@ Future<List<File>> _getFiles() async {
               }
             });
           } else {
-            _openFile(file, displayName, isEncrypted);
+            _openFile(file, displayName);
           }
         },
         onLongPress: () {
@@ -826,7 +827,7 @@ Future<List<File>> _getFiles() async {
                 // Actions
                 if (!_isSelecting && isPdf)
                   GestureDetector(
-                    onTap: () => _openFile(file, displayName, isEncrypted),
+                    onTap: () => _openFile(file, displayName),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(

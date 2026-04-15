@@ -174,8 +174,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (result.toString().startsWith('ERROR:')) throw Exception(result.toString());
     final bytes = Uint8List.fromList(base64Decode(result.toString()));
-    final encrypted = await _encryptionService.encryptFile(bytes);
-    return _saveFile(encrypted, fileName, originalBytes: bytes, sourceUrl: sourceUrl, fetchedUrl: blobUrl);
+    return _saveFile(Uint8List(0), fileName, originalBytes: bytes, sourceUrl: sourceUrl, fetchedUrl: blobUrl);
   }
 
   Future<dynamic> _downloadHttp(DownloadStartRequest req) async {
@@ -196,49 +195,59 @@ class _HomePageState extends State<HomePage> {
       }
     }
     final encrypted = await _encryptionService.encryptFile(finalBytes);
-    return _saveFile(encrypted, fileName, originalBytes: finalBytes, sourceUrl: sourceUrl, fetchedUrl: fetchedUrl);
+    return _saveFile(Uint8List(0), fileName, originalBytes: finalBytes, sourceUrl: sourceUrl, fetchedUrl: fetchedUrl);
   }
 
-  Future<dynamic> _saveFile(
-    Uint8List encrypted,
-    String fileName, {
-    required Uint8List originalBytes,
-    required String sourceUrl,
-    required String fetchedUrl,
-  }) async {
-    late Directory dir;
-    if (Platform.isAndroid) {
-      dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
-      if (!await dir.exists()) await dir.create(recursive: true);
-    } else {
-      final d = await getApplicationDocumentsDirectory();
-      dir = Directory('${d.path}/GenuPortDownloads');
-      if (!await dir.exists()) await dir.create(recursive: true);
-    }
-    final finalName = fileName.endsWith('.enc') ? fileName : '$fileName.enc';
-    var path = '${dir.path}/$finalName';
-    int i = 1;
-    while (File(path).existsSync()) {
-      final parts = fileName.split('.');
-      path = parts.length > 1
-          ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}.enc'
-          : '${dir.path}/${fileName}_$i.enc';
-      i++;
-    }
-    final file = File(path);
-    await file.writeAsBytes(encrypted);
+Future<dynamic> _saveFile(
+  Uint8List encrypted, // NOTE: we re-encrypt below with metadata, ignore this param
+  String fileName, {
+  required Uint8List originalBytes,
+  required String sourceUrl,
+  required String fetchedUrl,
+}) async {
+  // Build metadata
+  final meta = FileMetadata.create(
+    fileName:      fileName,
+    sourceUrl:     sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
+    fetchedUrl:    fetchedUrl,
+    originalBytes: originalBytes,
+  );
 
-    // Save metadata sidecar
-    final meta = FileMetadataStore.create(
-      fileName: fileName,
-      sourceUrl: sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
-      fetchedUrl: fetchedUrl,
-      originalBytes: originalBytes,
-    );
-    await FileMetadataStore.save(file.path, meta);
+  // Encrypt WITH embedded metadata
+  final encryptedWithMeta = await _encryptionService.encryptFile(
+    originalBytes,
+    metadata: meta.toJson(),
+  );
 
-    return file;
+  late Directory dir;
+  if (Platform.isAndroid) {
+    dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
+    if (!await dir.exists()) await dir.create(recursive: true);
+  } else {
+    final d = await getApplicationDocumentsDirectory();
+    dir = Directory('${d.path}/GenuPortDownloads');
+    if (!await dir.exists()) await dir.create(recursive: true);
   }
+
+  // Save with .pdf extension
+  final baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
+  var path = '${dir.path}/$baseName';
+  int i = 1;
+  while (File(path).existsSync()) {
+    final parts = baseName.split('.');
+    path = parts.length > 1
+        ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}'
+        : '${dir.path}/${baseName}_$i';
+    i++;
+  }
+  final file = File(path);
+  await file.writeAsBytes(encryptedWithMeta);
+  print('💾 [METADATA] File saved with embedded metadata:');
+  print('   • Path: $path');
+  print('   • File size: ${file.lengthSync()} bytes (encrypted with metadata)');
+  print('   • Metadata embedded: ${meta.toJson()}');
+  return file;
+}
 
   @override
   void dispose() {

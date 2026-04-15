@@ -310,7 +310,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey, // Use global navigator key
-      home: const LoginPage(), // ✅ START HERE
+      home: const LoginPage(),
     );
   }
 }

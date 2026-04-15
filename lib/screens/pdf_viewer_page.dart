@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pdfx/pdfx.dart';
 
 class PdfViewerPage extends StatefulWidget {
   final File file;
-  const PdfViewerPage({required this.file, super.key});
+  final Uint8List? bytes;
+  const PdfViewerPage({required this.file, this.bytes, super.key});
 
   @override
   State<PdfViewerPage> createState() => _PdfViewerPageState();
@@ -28,50 +30,57 @@ class _PdfViewerPageState extends State<PdfViewerPage> {
         _error = null;
       });
 
-      // Check if file exists
-      if (!await widget.file.exists()) {
-        throw Exception('File not found');
+      late Future<PdfDocument> document;
+
+      if (widget.bytes != null) {
+        // Use provided decrypted bytes
+        print('📄 Loading PDF from bytes (${widget.bytes!.length} bytes)');
+        document = PdfDocument.openData(widget.bytes!);
+      } else {
+        // Check if file exists and use file path
+        if (!await widget.file.exists()) {
+          throw Exception('File not found');
+        }
+
+        final fileSize = await widget.file.length();
+        print('📄 Loading PDF: ${widget.file.path}');
+        print('📊 File size: $fileSize bytes');
+
+        if (fileSize == 0) {
+          throw Exception('File is empty (0 bytes)');
+        }
+
+        document = PdfDocument.openFile(widget.file.path);
       }
 
-      // Check file size
-      final fileSize = await widget.file.length();
-      print('📄 Loading PDF: ${widget.file.path}');
-      print('📊 File size: $fileSize bytes');
+      _pdfController = PdfController(document: document);
 
-      if (fileSize == 0) {
-        throw Exception('File is empty (0 bytes)');
-      }
-
-      // Create PdfController with Future<PdfDocument>
-      _pdfController = PdfController(
-        document: PdfDocument.openFile(widget.file.path), // This returns Future<PdfDocument>
-      );
-      
       setState(() {
         _isLoading = false;
       });
-      
+
       print('✅ PDF loaded successfully');
     } catch (e) {
       print('❌ Failed to load PDF: $e');
-      
+
       String errorMessage;
-      if (e.toString().contains('err=3') || 
-          e.toString().contains('Parse Document failed')) {
+      if (e.toString().contains('err=3') ||
+          e.toString().contains('Parse Document failed') ||
+          e.toString().contains('Invalid PDF format')) {
         errorMessage = 'PDF file is corrupted or still password-protected.\n\n'
-                      'This might happen if:\n'
-                      '• The PDF password was incorrect\n'
-                      '• The file wasn\'t fully decrypted\n'
-                      '• The download was incomplete\n\n'
-                      'Try re-downloading the file.';
+            'This might happen if:\n'
+            '• The PDF password was incorrect\n'
+            '• The file wasn\'t fully decrypted\n'
+            '• The download was incomplete\n\n'
+            'Try re-downloading the file.';
       } else if (e.toString().contains('password')) {
         errorMessage = 'This PDF is still password protected.\n\n'
-                      'The password removal failed during download.\n'
-                      'Please re-download and provide the correct password.';
+            'The password removal failed during download.\n'
+            'Please re-download and provide the correct password.';
       } else {
         errorMessage = 'Cannot open PDF file.\n\nError: ${e.toString()}';
       }
-      
+
       setState(() {
         _error = errorMessage;
         _isLoading = false;

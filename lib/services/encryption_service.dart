@@ -10,135 +10,145 @@ class EncryptionService {
   EncryptionService._internal();
 
   final _secureStorage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(
-      encryptedSharedPreferences: true,
-    ),
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
   static const String _keyStorageKey = 'encryption_key';
   static const String _ivStorageKey = 'encryption_iv';
+  // Header: 13 bytes "GENUP_ENC_V1:"
+  static final List<int> _header = utf8.encode('GENUP_ENC_V1:');
 
   encrypt_pkg.Key? _encryptionKey;
   encrypt_pkg.IV? _iv;
 
-  /// Initialize or retrieve the encryption key
   Future<void> initialize() async {
     try {
-      // Try to retrieve existing key
       String? storedKey = await _secureStorage.read(key: _keyStorageKey);
-      String? storedIV = await _secureStorage.read(key: _ivStorageKey);
-
+      String? storedIV  = await _secureStorage.read(key: _ivStorageKey);
       if (storedKey != null && storedIV != null) {
-        // Use existing key
         _encryptionKey = encrypt_pkg.Key.fromBase64(storedKey);
         _iv = encrypt_pkg.IV.fromBase64(storedIV);
-        print('🔑 Retrieved existing encryption key');
       } else {
-        // Generate new key
         await _generateNewKey();
-        print('🔑 Generated new encryption key');
       }
     } catch (e) {
-      print('❌ Error initializing encryption: $e');
-      // If there's any error, generate a new key
       await _generateNewKey();
     }
   }
 
-  /// Generate a new encryption key and IV
   Future<void> _generateNewKey() async {
-    _encryptionKey = encrypt_pkg.Key.fromSecureRandom(32); // 256-bit key
-    _iv = encrypt_pkg.IV.fromSecureRandom(16); // 128-bit IV
-
-    // Store securely
-    await _secureStorage.write(
-      key: _keyStorageKey,
-      value: _encryptionKey!.base64,
-    );
-    await _secureStorage.write(
-      key: _ivStorageKey,
-      value: _iv!.base64,
-    );
+    _encryptionKey = encrypt_pkg.Key.fromSecureRandom(32);
+    _iv = encrypt_pkg.IV.fromSecureRandom(16);
+    await _secureStorage.write(key: _keyStorageKey, value: _encryptionKey!.base64);
+    await _secureStorage.write(key: _ivStorageKey,  value: _iv!.base64);
   }
 
-  /// Encrypt file bytes
-  Future<Uint8List> encryptFile(Uint8List fileBytes) async {
-    if (_encryptionKey == null || _iv == null) {
-      await initialize();
+  /// Encrypt file bytes, optionally embedding metadata JSON inline.
+  /// File format: [header 13B][metaLen 4B big-endian][metaJSON nB][encryptedBytes]
+  Future<Uint8List> encryptFile(Uint8List fileBytes, {Map<String, dynamic>? metadata}) async {
+    if (_encryptionKey == null || _iv == null) await initialize();
+
+    final encrypter = encrypt_pkg.Encrypter(
+      encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
+    );
+    final encrypted = encrypter.encryptBytes(fileBytes, iv: _iv!);
+
+    // Serialize metadata (empty object if none provided)
+    final metaJson  = utf8.encode(jsonEncode(metadata ?? {}));
+    final metaLen   = metaJson.length;
+
+    // 4-byte big-endian length prefix for metadata
+    final metaLenBytes = Uint8List(4)
+      ..[0] = (metaLen >> 24) & 0xFF
+      ..[1] = (metaLen >> 16) & 0xFF
+      ..[2] = (metaLen >> 8)  & 0xFF
+      ..[3] =  metaLen        & 0xFF;
+
+    return Uint8List.fromList([
+      ..._header,
+      ...metaLenBytes,
+      ...metaJson,
+      ...encrypted.bytes,
+    ]);
+  }
+
+  /// Decrypt file bytes. Returns decrypted bytes and embedded metadata.
+  Future<({Uint8List bytes, Map<String, dynamic> metadata})> decryptFileWithMeta(
+      Uint8List encryptedBytes) async {
+    if (_encryptionKey == null || _iv == null) await initialize();
+
+    final hLen = _header.length; // 13
+
+    // Validate header
+    if (encryptedBytes.length < hLen + 4) {
+      throw Exception('File too short to be a valid encrypted file');
+    }
+    if (!_bytesEqual(encryptedBytes.sublist(0, hLen), _header)) {
+      // Legacy file without metadata — just decrypt as-is
+      return (bytes: await _decryptLegacy(encryptedBytes), metadata: <String, dynamic>{});
     }
 
+    // Read 4-byte metadata length
+    int metaLen = (encryptedBytes[hLen]     << 24) |
+                  (encryptedBytes[hLen + 1] << 16) |
+                  (encryptedBytes[hLen + 2] << 8)  |
+                   encryptedBytes[hLen + 3];
+
+    final metaStart = hLen + 4;
+    final dataStart = metaStart + metaLen;
+
+    if (dataStart > encryptedBytes.length) {
+      throw Exception('Corrupted file: metadata length exceeds file size');
+    }
+
+    // Parse metadata
+    Map<String, dynamic> meta = {};
     try {
-      final encrypter = encrypt_pkg.Encrypter(
-        encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
-      );
-
-      // Encrypt the file bytes
-      final encrypted = encrypter.encryptBytes(fileBytes, iv: _iv!);
-
-      // Add a custom header to identify encrypted files
-      final header = utf8.encode('GENUP_ENC_V1:');
-      final result = Uint8List.fromList([...header, ...encrypted.bytes]);
-
-      print('🔒 File encrypted successfully (${fileBytes.length} → ${result.length} bytes)');
-      return result;
+      final metaBytes = encryptedBytes.sublist(metaStart, dataStart);
+      meta = jsonDecode(utf8.decode(metaBytes)) as Map<String, dynamic>;
+      print('📖 [METADATA] Extracted metadata from encrypted file:');
+      print('   • Metadata length: $metaLen bytes');
+      print('   • Metadata content: $meta');
     } catch (e) {
-      print('❌ Encryption error: $e');
-      throw Exception('Failed to encrypt file: $e');
+      print('⚠️  [METADATA] Failed to extract metadata: $e');
     }
+
+    // Decrypt
+    final encrypter = encrypt_pkg.Encrypter(
+      encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
+    );
+    final dataBytes = encryptedBytes.sublist(dataStart);
+    final decrypted = encrypter.decryptBytes(encrypt_pkg.Encrypted(dataBytes), iv: _iv!);
+
+    return (bytes: Uint8List.fromList(decrypted), metadata: meta);
   }
 
-  /// Decrypt file bytes
+  /// Convenience wrapper — returns only decrypted bytes (for callers that don't need metadata).
   Future<Uint8List> decryptFile(Uint8List encryptedBytes) async {
-    if (_encryptionKey == null || _iv == null) {
-      await initialize();
-    }
-
-    try {
-      // Check for our custom header
-      final header = utf8.encode('GENUP_ENC_V1:');
-      final hasHeader = encryptedBytes.length > header.length &&
-          _bytesEqual(
-            encryptedBytes.sublist(0, header.length),
-            header,
-          );
-
-      Uint8List dataToDecrypt;
-      if (hasHeader) {
-        // Remove header before decryption
-        dataToDecrypt = encryptedBytes.sublist(header.length);
-      } else {
-        // File might not be encrypted (legacy file)
-        print('⚠️ File does not have encryption header, might be unencrypted');
-        return encryptedBytes;
-      }
-
-      final encrypter = encrypt_pkg.Encrypter(
-        encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
-      );
-
-      final encrypted = encrypt_pkg.Encrypted(dataToDecrypt);
-      final decrypted = encrypter.decryptBytes(encrypted, iv: _iv!);
-
-      print('🔓 File decrypted successfully (${encryptedBytes.length} → ${decrypted.length} bytes)');
-      return Uint8List.fromList(decrypted);
-    } catch (e) {
-      print('❌ Decryption error: $e');
-      throw Exception('Failed to decrypt file: $e');
-    }
+    final result = await decryptFileWithMeta(encryptedBytes);
+    return result.bytes;
   }
 
-  /// Check if a file is encrypted
-  bool isFileEncrypted(Uint8List fileBytes) {
-    final header = utf8.encode('GENUP_ENC_V1:');
-    if (fileBytes.length < header.length) return false;
-
-    return _bytesEqual(
-      fileBytes.sublist(0, header.length),
-      header,
+  Future<Uint8List> _decryptLegacy(Uint8List encryptedBytes) async {
+    final hLen = _header.length;
+    final hasOldHeader = encryptedBytes.length > hLen &&
+        _bytesEqual(encryptedBytes.sublist(0, hLen), _header);
+    final dataToDecrypt = hasOldHeader
+        ? encryptedBytes.sublist(hLen)
+        : encryptedBytes;
+    final encrypter = encrypt_pkg.Encrypter(
+      encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
+    );
+    return Uint8List.fromList(
+      encrypter.decryptBytes(encrypt_pkg.Encrypted(dataToDecrypt), iv: _iv!),
     );
   }
 
-  /// Helper to compare byte arrays
+  bool isFileEncrypted(Uint8List fileBytes) {
+    if (fileBytes.length < _header.length) return false;
+    return _bytesEqual(fileBytes.sublist(0, _header.length), _header);
+  }
+
   bool _bytesEqual(List<int> a, List<int> b) {
     if (a.length != b.length) return false;
     for (int i = 0; i < a.length; i++) {
@@ -147,18 +157,12 @@ class EncryptionService {
     return true;
   }
 
-  /// Generate a hash of the file for integrity verification (optional)
-  String generateFileHash(Uint8List fileBytes) {
-    final digest = sha256.convert(fileBytes);
-    return digest.toString();
-  }
+  String generateFileHash(Uint8List fileBytes) => sha256.convert(fileBytes).toString();
 
-  /// Clear all encryption keys (use with caution!)
   Future<void> resetEncryption() async {
     await _secureStorage.delete(key: _keyStorageKey);
     await _secureStorage.delete(key: _ivStorageKey);
     _encryptionKey = null;
     _iv = null;
-    print('🔄 Encryption keys cleared');
   }
 }

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:genuport/services/encryption_service.dart';
@@ -29,22 +28,46 @@ class _FileMetadataSheetState extends State<FileMetadataSheet> {
   }
 
   Future<void> _load() async {
-    final meta = await FileMetadataStore.load(widget.file.path);
-    if (mounted) setState(() { _meta = meta; _loading = false; });
-  }
-
-  Future<void> _checkIntegrity() async {
-    if (_meta == null) return;
-    setState(() => _checkingIntegrity = true);
-    try {
-      final encBytes = await widget.file.readAsBytes();
-      final decBytes = await EncryptionService().decryptFile(encBytes);
-      final ok = _meta!.verifyIntegrity(decBytes);
-      if (mounted) setState(() { _integrityOk = ok; _checkingIntegrity = false; });
-    } catch (e) {
-      if (mounted) setState(() { _integrityOk = false; _checkingIntegrity = false; });
+  try {
+    final encBytes = await widget.file.readAsBytes();
+    final result   = await EncryptionService().decryptFileWithMeta(encBytes);
+    final metaMap  = result.metadata;
+    if (metaMap.isNotEmpty) {
+      final meta = FileMetadata.fromJson(metaMap);
+      print('📋 [METADATA_SHEET] Loaded metadata for display:');
+      print('   • File: ${widget.displayName}');
+      print('   • fileName: ${meta.fileName}');
+      print('   • sourceUrl: ${meta.sourceUrl}');
+      print('   • fetchedUrl: ${meta.fetchedUrl}');
+      print('   • timestamp: ${meta.formattedTimestamp}');
+      print('   • fileSize: ${meta.formattedSize}');
+      print('   • hash: ${meta.sha256Hash}');
+      if (mounted) setState(() { _meta = meta; _loading = false; });
+    } else {
+      print('⚠️  [METADATA_SHEET] No metadata found in file');
+      if (mounted) setState(() { _loading = false; }); // no metadata
     }
+  } catch (e) {
+    print('❌ [METADATA_SHEET] Error loading metadata: $e');
+    if (mounted) setState(() { _loading = false; });
   }
+}
+Future<void> _checkIntegrity() async {
+  if (_meta == null) return;
+  setState(() => _checkingIntegrity = true);
+  try {
+    final encBytes = await widget.file.readAsBytes();
+    final result   = await EncryptionService().decryptFileWithMeta(encBytes);
+    final ok       = _meta!.verifyIntegrity(result.bytes);
+    print('🔐 [METADATA_SHEET] Integrity check:');
+    print('   • Expected hash: ${_meta!.sha256Hash}');
+    print('   • File matches: $ok');
+    if (mounted) setState(() { _integrityOk = ok; _checkingIntegrity = false; });
+  } catch (e) {
+    print('❌ [METADATA_SHEET] Integrity check failed: $e');
+    if (mounted) setState(() { _integrityOk = false; _checkingIntegrity = false; });
+  }
+}
 
   @override
   Widget build(BuildContext context) {

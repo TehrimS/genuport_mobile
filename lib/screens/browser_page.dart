@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:genuport/services/file_metadata.dart';
 import 'package:genuport/services/pdf_unlocker.dart';
 import 'package:genuport/services/encryption_service.dart';
 import 'package:genuport/themes/gp_colors.dart';
@@ -1183,7 +1184,7 @@ class _BrowserPageState extends State<BrowserPage>
     }
 
     final encryptedBytes = await _encryptionService.encryptFile(finalBytes);
-    return _saveEncryptedFile(encryptedBytes, fileName);
+    return _saveEncryptedFile(finalBytes, fileName);
   }
 
   Future<File> _saveToDownloads(DownloadStartRequest request) async {
@@ -1202,7 +1203,7 @@ class _BrowserPageState extends State<BrowserPage>
       _showSnackBar('ℹ️ Password-protected PDF. Enter password when viewing.');
     }
     final encryptedBytes = await _encryptionService.encryptFile(finalBytes);
-    return _saveEncryptedFile(encryptedBytes, fileName);
+    return _saveEncryptedFile(finalBytes, fileName);
   }
 
   Future<Uint8List> _checkPdf(Uint8List pdfBytes) async {
@@ -1219,43 +1220,51 @@ class _BrowserPageState extends State<BrowserPage>
 
  // Update this function to save encrypted files in a dedicated "GenuPortDownloads" folder on both Android and iOS, with proper permission handling and user feedback.
   Future<File> _saveEncryptedFile(
-    Uint8List encryptedBytes,
-    String fileName,
-  ) async {
-    Directory directory;
-    if (Platform.isAndroid) {
-      directory = Directory('/storage/emulated/0/Download/GenuPortDownloads');
-      if (!await directory.exists()) await directory.create(recursive: true);
-    } else if (Platform.isIOS) {
-      // iOS: Use app documents directory
-      final docDir = await getApplicationDocumentsDirectory();
-      directory = Directory('${docDir.path}/GenuPortDownloads');
-      if (!await directory.exists()) await directory.create(recursive: true);
-    } else {
-      throw Exception('Unsupported platform');
-    }
+  Uint8List originalBytes,  // now takes ORIGINAL bytes, not pre-encrypted
+  String fileName, {
+  String sourceUrl = '',
+  String fetchedUrl = '',
+}) async {
+  // Build and embed metadata
+  final meta = FileMetadata.create(
+    fileName:      fileName,
+    sourceUrl:     sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
+    fetchedUrl:    fetchedUrl,
+    originalBytes: originalBytes,
+  );
+  final encryptedBytes = await _encryptionService.encryptFile(
+    originalBytes,
+    metadata: meta.toJson(),
+  );
 
-    String finalFileName = fileName.endsWith('.enc')
-        ? fileName
-        : '$fileName.enc';
-    String filePath = "${directory.path}/$finalFileName";
-    int counter = 1;
-    while (File(filePath).existsSync()) {
-      final clean = fileName.replaceAll('.enc', '');
-      final parts = clean.split('.');
-      if (parts.length > 1) {
-        finalFileName =
-            "${parts.sublist(0, parts.length - 1).join('.')}_$counter.${parts.last}.enc";
-      } else {
-        finalFileName = "${clean}_$counter.enc";
-      }
-      filePath = "${directory.path}/$finalFileName";
-      counter++;
-    }
-    final file = File(filePath);
-    await file.writeAsBytes(encryptedBytes);
-    return file;
+  Directory directory;
+  if (Platform.isAndroid) {
+    directory = Directory('/storage/emulated/0/Download/GenuPortDownloads');
+    if (!await directory.exists()) await directory.create(recursive: true);
+  } else if (Platform.isIOS) {
+    final docDir = await getApplicationDocumentsDirectory();
+    directory = Directory('${docDir.path}/GenuPortDownloads');
+    if (!await directory.exists()) await directory.create(recursive: true);
+  } else {
+    throw Exception('Unsupported platform');
   }
+
+  // Always .pdf extension
+  String baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
+  String filePath = '${directory.path}/$baseName';
+  int counter = 1;
+  while (File(filePath).existsSync()) {
+    final parts = baseName.split('.');
+    final base  = parts.sublist(0, parts.length - 1).join('.');
+    final ext   = parts.last;
+    filePath = '${directory.path}/${base}_$counter.$ext';
+    counter++;
+  }
+  final file = File(filePath);
+  await file.writeAsBytes(encryptedBytes);
+  return file;
+}
+
 
   @override
   void dispose() {
