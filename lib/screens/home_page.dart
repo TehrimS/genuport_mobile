@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:genuport/services/encryption_service.dart';
 import 'package:genuport/services/pdf_unlocker.dart';
+import 'package:genuport/services/file_metadata.dart';
 import 'package:genuport/themes/gp_colors.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -143,6 +144,7 @@ class _HomePageState extends State<HomePage> {
   Future<dynamic> _downloadBlob(DownloadStartRequest req, InAppWebViewController ctrl) async {
     final blobUrl = req.url.toString();
     final fileName = req.suggestedFilename ?? 'file';
+    final sourceUrl = _currentUrl; // page the user was on when download started
     var result = await ctrl.evaluateJavascript(source: """
       (function(){
         if(window.blobCache&&window.blobCache['$blobUrl'])return window.blobCache['$blobUrl'];
@@ -173,13 +175,15 @@ class _HomePageState extends State<HomePage> {
     if (result.toString().startsWith('ERROR:')) throw Exception(result.toString());
     final bytes = Uint8List.fromList(base64Decode(result.toString()));
     final encrypted = await _encryptionService.encryptFile(bytes);
-    return _saveFile(encrypted, fileName);
+    return _saveFile(encrypted, fileName, originalBytes: bytes, sourceUrl: sourceUrl, fetchedUrl: blobUrl);
   }
 
   Future<dynamic> _downloadHttp(DownloadStartRequest req) async {
     final fileName = req.suggestedFilename ?? 'file';
+    final sourceUrl = _currentUrl;
+    final fetchedUrl = req.url.toString();
     final client = HttpClient();
-    final r = await client.getUrl(Uri.parse(req.url.toString()));
+    final r = await client.getUrl(Uri.parse(fetchedUrl));
     final res = await r.close();
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final bytes = await consolidateHttpClientResponseBytes(res);
@@ -192,10 +196,16 @@ class _HomePageState extends State<HomePage> {
       }
     }
     final encrypted = await _encryptionService.encryptFile(finalBytes);
-    return _saveFile(encrypted, fileName);
+    return _saveFile(encrypted, fileName, originalBytes: finalBytes, sourceUrl: sourceUrl, fetchedUrl: fetchedUrl);
   }
 
-  Future<dynamic> _saveFile(Uint8List encrypted, String fileName) async {
+  Future<dynamic> _saveFile(
+    Uint8List encrypted,
+    String fileName, {
+    required Uint8List originalBytes,
+    required String sourceUrl,
+    required String fetchedUrl,
+  }) async {
     late Directory dir;
     if (Platform.isAndroid) {
       dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
@@ -217,6 +227,16 @@ class _HomePageState extends State<HomePage> {
     }
     final file = File(path);
     await file.writeAsBytes(encrypted);
+
+    // Save metadata sidecar
+    final meta = FileMetadataStore.create(
+      fileName: fileName,
+      sourceUrl: sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
+      fetchedUrl: fetchedUrl,
+      originalBytes: originalBytes,
+    );
+    await FileMetadataStore.save(file.path, meta);
+
     return file;
   }
 

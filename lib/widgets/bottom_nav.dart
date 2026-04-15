@@ -29,7 +29,7 @@ class BottomNavState extends State<BottomNav> {
   void goToTab(int index) => setState(() => _currentIndex = index);
 
   // Pages kept alive with IndexedStack
-  final _pages = const [
+  final _pages = [
     HomePage(),
     DownloadsPage(),
     ProfilePage(),

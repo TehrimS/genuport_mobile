@@ -3,7 +3,9 @@ import 'package:genuport/themes/gp_colors.dart';
 import 'info_page.dart';
 
 class ConsentPage extends StatefulWidget {
-  const ConsentPage({super.key});
+  final String phone;
+  final String loanId;
+  const ConsentPage({super.key, required this.phone, required this.loanId});
 
   @override
   State<ConsentPage> createState() => _ConsentPageState();
@@ -36,7 +38,7 @@ class _ConsentPageState extends State<ConsentPage>
     if (!isChecked) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const InfoPage(phone: '', loanId: '')),
+      MaterialPageRoute(builder: (_) => InfoPage(phone: widget.phone, loanId: widget.loanId)),
     );
   }
 

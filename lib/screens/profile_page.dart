@@ -22,20 +22,26 @@ class UserProfile {
   String get initials => '${firstName.isNotEmpty ? firstName[0] : ''}${lastName.isNotEmpty ? lastName[0] : ''}'.toUpperCase();
 }
 
-/// Simple static store — swap for SharedPreferences/Provider in production.
+/// Reactive store using ValueNotifier — UI rebuilds automatically when data changes.
 class UserProfileStore {
-  static UserProfile? current;
+  static final ValueNotifier<UserProfile?> notifier = ValueNotifier(null);
+
+  static UserProfile? get current => notifier.value;
 
   static void save({
     required String firstName, required String lastName,
     required String phone, required String loanId,
     required String dob, required String pan, required String aadhaar,
   }) {
-    current = UserProfile(
+    notifier.value = UserProfile(
       firstName: firstName, lastName: lastName,
       phone: phone, loanId: loanId,
       dob: dob, pan: pan, aadhaar: aadhaar,
     );
+  }
+
+  static void clear() {
+    notifier.value = null;
   }
 }
 
@@ -46,37 +52,40 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = UserProfileStore.current;
-
-    return Scaffold(
-      backgroundColor: GPColors.surfacePage,
-      body: CustomScrollView(slivers: [
-        _appBar(p),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-          sliver: SliverList(delegate: SliverChildListDelegate([
-            _card('Loan Information', [
-              _row(Icons.badge_outlined,        'Loan ID', p?.loanId ?? '—'),
-              _row(Icons.phone_android_rounded, 'Mobile',  p != null ? '+91 ${p.phone}' : '—'),
-            ]),
-            const SizedBox(height: 14),
-            _card('Personal Details', [
-              _row(Icons.person_outline_rounded, 'Full Name',    p?.fullName ?? '—'),
-              _row(Icons.cake_outlined,           'Date of Birth', p?.dob ?? '—'),
-              _row(Icons.credit_card_rounded,     'PAN',          _maskPan(p?.pan)),
-              _row(Icons.fingerprint_rounded,     'Aadhaar',      _maskAadhaar(p?.aadhaar)),
-            ]),
-            const SizedBox(height: 14),
-            _card('Security Status', [
-              _statusRow(Icons.verified_user_rounded, 'AES-256 Encryption', 'Active'),
-              _statusRow(Icons.lock_rounded,           'Document Protection', 'Enabled'),
-              _statusRow(Icons.how_to_reg_rounded,    'Consent Verified',    'Complete'),
-            ]),
-            const SizedBox(height: 20),
-            _signOutButton(context),
-          ])),
-        ),
-      ]),
+    return ValueListenableBuilder<UserProfile?>(
+      valueListenable: UserProfileStore.notifier,
+      builder: (context, p, _) {
+        return Scaffold(
+          backgroundColor: GPColors.surfacePage,
+          body: CustomScrollView(slivers: [
+            _appBar(p),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+              sliver: SliverList(delegate: SliverChildListDelegate([
+                _card('Loan Information', [
+                  _row(Icons.badge_outlined,        'Loan ID', p?.loanId ?? '—'),
+                  _row(Icons.phone_android_rounded, 'Mobile',  p != null ? '+91 ${p.phone}' : '—'),
+                ]),
+                const SizedBox(height: 14),
+                _card('Personal Details', [
+                  _row(Icons.person_outline_rounded, 'Full Name',     p?.fullName ?? '—'),
+                  _row(Icons.cake_outlined,           'Date of Birth', p?.dob ?? '—'),
+                  _row(Icons.credit_card_rounded,     'PAN',           _maskPan(p?.pan)),
+                  _row(Icons.fingerprint_rounded,     'Aadhaar',       _maskAadhaar(p?.aadhaar)),
+                ]),
+                const SizedBox(height: 14),
+                _card('Security Status', [
+                  _statusRow(Icons.verified_user_rounded, 'AES-256 Encryption',  'Active'),
+                  _statusRow(Icons.lock_rounded,           'Document Protection', 'Enabled'),
+                  _statusRow(Icons.how_to_reg_rounded,    'Consent Verified',     'Complete'),
+                ]),
+                const SizedBox(height: 20),
+                _signOutButton(context),
+              ])),
+            ),
+          ]),
+        );
+      },
     );
   }
 
@@ -118,11 +127,15 @@ class ProfilePage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Text(p?.fullName ?? 'Your Name',
-                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                  Text(
+                    p?.fullName ?? 'Your Name',
+                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 2),
-                  Text(p != null ? '+91 ${p.phone}' : '—',
-                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12.5)),
+                  Text(
+                    p != null ? '+91 ${p.phone}' : '—',
+                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12.5),
+                  ),
                 ],
               ),
             ),
@@ -194,7 +207,7 @@ class ProfilePage extends StatelessWidget {
     return SizedBox(
       width: double.infinity, height: 48,
       child: OutlinedButton.icon(
-        onPressed: () => showDialog(context: context, builder: (_) => _SignOutDialog()),
+        onPressed: () => showDialog(context: context, builder: (_) => const _SignOutDialog()),
         style: OutlinedButton.styleFrom(
           foregroundColor: GPColors.error,
           side: const BorderSide(color: GPColors.errorBorder),
@@ -207,8 +220,6 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  // ── Helpers ──
-
   String _maskPan(String? pan) {
     if (pan == null || pan.length < 4) return pan ?? '—';
     return '${pan.substring(0, 2)}${'•' * (pan.length - 4)}${pan.substring(pan.length - 2)}';
@@ -220,7 +231,11 @@ class ProfilePage extends StatelessWidget {
   }
 }
 
+// ── Sign Out Dialog ──────────────────────────────────────────────────────────
+
 class _SignOutDialog extends StatelessWidget {
+  const _SignOutDialog();
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -266,7 +281,7 @@ class _SignOutDialog extends StatelessWidget {
               Expanded(
                 child: ElevatedButton(
                   onPressed: () {
-                    UserProfileStore.current = null;
+                    UserProfileStore.clear();
                     Navigator.pop(context);
                     Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
                   },

@@ -52,8 +52,12 @@ class _OtpPageState extends State<OtpPage>
   void dispose() {
     _timer?.cancel();
     _animController?.dispose();
-    for (final c in _controllers) c.dispose();
-    for (final f in _focusNodes) f.dispose();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
     super.dispose();
   }
 
@@ -87,7 +91,7 @@ class _OtpPageState extends State<OtpPage>
       if (verified) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const ConsentPage()),
+          MaterialPageRoute(builder: (_) => ConsentPage(phone: widget.phone, loanId: widget.loanId)),
         );
       } else {
         setState(() => errorMessage = 'Invalid OTP. Please try again.');

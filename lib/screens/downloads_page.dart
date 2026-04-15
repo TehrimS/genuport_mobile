@@ -441,16 +441,16 @@ Future<List<File>> _getFiles() async {
         backgroundColor: GPColors.surface,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, color: GPColors.primaryMid, size: 20),
-          onPressed: () {
-            if (_isSelecting) {
-              setState(() { _isSelecting = false; _selectedPaths.clear(); });
-            } else {
-              Navigator.pop(context);
-            }
-          },
-        ),
+        // ── REMOVED back button from leading when not selecting ──
+        automaticallyImplyLeading: false,
+        leading: _isSelecting
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_rounded, color: GPColors.primaryMid, size: 20),
+                onPressed: () {
+                  setState(() { _isSelecting = false; _selectedPaths.clear(); });
+                },
+              )
+            : null,
         title: _isSelecting
             ? Text(
                 '${_selectedPaths.length} selected',
