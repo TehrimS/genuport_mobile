@@ -3,16 +3,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:genuport/services/file_metadata.dart';
+import 'package:genuport/services/file_metadata.dart';  // ✅ ADDED
 import 'package:genuport/services/pdf_unlocker.dart';
 import 'package:genuport/services/encryption_service.dart';
 import 'package:genuport/themes/gp_colors.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'downloads_page.dart';
-// ─────────────────────────────────────────────
-//  JavaScript: overlay trending searches
-// ─────────────────────────────────────────────
 
 class BrowserPage extends StatefulWidget {
   final String? initialUrl;
@@ -22,8 +19,7 @@ class BrowserPage extends StatefulWidget {
   State<BrowserPage> createState() => _BrowserPageState();
 }
 
-class _BrowserPageState extends State<BrowserPage>
-    with TickerProviderStateMixin {
+class _BrowserPageState extends State<BrowserPage> with TickerProviderStateMixin {
   InAppWebViewController? _controller;
   late TextEditingController _urlController;
   final _encryptionService = EncryptionService();
@@ -182,11 +178,8 @@ class _BrowserPageState extends State<BrowserPage>
       body: SafeArea(
         child: Column(
           children: [
-            // ── Branded App Bar ──
             _buildAppBar(),
-            // ── Nav + URL row ──
             _buildNavRow(),
-            // ── Loading indicator ──
             if (_isLoading)
               SizedBox(
                 height: 2,
@@ -196,7 +189,6 @@ class _BrowserPageState extends State<BrowserPage>
                   valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               ),
-            // ── WebView + Trending Overlay ──
             Expanded(
               child: Stack(
                 children: [
@@ -206,9 +198,7 @@ class _BrowserPageState extends State<BrowserPage>
                 ],
               ),
             ),
-            // ── Status bar ──
             if (_status.isNotEmpty) _buildStatusBar(),
-            // ── Security banner at bottom ──
             if (_encryptionInitialized)
               FadeTransition(
                 opacity: _bannerAnim,
@@ -220,7 +210,6 @@ class _BrowserPageState extends State<BrowserPage>
     );
   }
 
-  // ─── Branded App Bar ───────────────────────
   Widget _buildAppBar() {
     return Container(
       decoration: const BoxDecoration(
@@ -233,7 +222,6 @@ class _BrowserPageState extends State<BrowserPage>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
-          // Shield icon
           Container(
             width: 32,
             height: 32,
@@ -249,7 +237,6 @@ class _BrowserPageState extends State<BrowserPage>
             ),
           ),
           const SizedBox(width: 10),
-          // Title
           const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -273,7 +260,6 @@ class _BrowserPageState extends State<BrowserPage>
             ],
           ),
           const Spacer(),
-          // Downloads button
           GestureDetector(
             onTap: () => Navigator.push(
               context,
@@ -311,7 +297,6 @@ class _BrowserPageState extends State<BrowserPage>
     );
   }
 
-  // ─── Nav Row (back/fwd/refresh + URL pill) ──
   Widget _buildNavRow() {
     return Container(
       color: GPColors.primary,
@@ -335,7 +320,6 @@ class _BrowserPageState extends State<BrowserPage>
                 _isLoading ? _controller?.stopLoading() : _controller?.reload(),
           ),
           const SizedBox(width: 6),
-          // ── Pill URL bar ──
           Expanded(
             child: GestureDetector(
               onTap: () => _urlFocusNode.requestFocus(),
@@ -463,62 +447,48 @@ class _BrowserPageState extends State<BrowserPage>
   Widget _buildWebView() {
     final isGoogleHome = _checkIsGoogleHomepage(_currentUrl);
 
-    return Stack(
-      children: [
-        InAppWebView(
-          initialUrlRequest: URLRequest(
-            url: WebUri(widget.initialUrl ?? "https://www.google.com"),
-          ),
-          initialSettings: InAppWebViewSettings(
-            useOnDownloadStart: true,
-            javaScriptEnabled: true,
-            allowFileAccess: true,
-            allowContentAccess: true,
-          ),
-          onWebViewCreated: (controller) {
-            _controller = controller;
-            _injectBlobInterceptor(controller);
-          },
-          onLoadStart: (controller, url) {
-            final urlStr = url?.toString() ?? "";
-            setState(() {
-              _urlController.text = urlStr;
-              _currentUrl = urlStr;
-              _displayDomain = _extractDomain(urlStr);
-              _isLoading = true;
-              _loadingProgress = 0;
-            });
-            _updateNavButtons();
-          },
-          onProgressChanged: (controller, progress) {
-            setState(() => _loadingProgress = progress / 100.0);
-          },
-          onLoadStop: (controller, url) async {
-            final urlStr = url?.toString() ?? "";
-            await _injectBlobInterceptor(controller);
-            setState(() {
-              _urlController.text = urlStr;
-              _currentUrl = urlStr;
-              _displayDomain = _extractDomain(urlStr);
-              _isLoading = false;
-            });
-            _updateNavButtons();
-          },
-          onDownloadStartRequest: (controller, request) async {
-            await _handleDownload(request, controller);
-          },
-        ),
-
-        // ── Flutter overlay: covers trending on Google homepage only ──
-        if (isGoogleHome)
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 290,
-            bottom: 0,
-            child: _buildGoogleOverlay(),
-          ),
-      ],
+    return InAppWebView(
+      initialUrlRequest: URLRequest(
+        url: WebUri(widget.initialUrl ?? "https://www.google.com"),
+      ),
+      initialSettings: InAppWebViewSettings(
+        useOnDownloadStart: true,
+        javaScriptEnabled: true,
+        allowFileAccess: true,
+        allowContentAccess: true,
+      ),
+      onWebViewCreated: (controller) {
+        _controller = controller;
+        _injectBlobInterceptor(controller);
+      },
+      onLoadStart: (controller, url) {
+        final urlStr = url?.toString() ?? "";
+        setState(() {
+          _urlController.text = urlStr;
+          _currentUrl = urlStr;
+          _displayDomain = _extractDomain(urlStr);
+          _isLoading = true;
+          _loadingProgress = 0;
+        });
+        _updateNavButtons();
+      },
+      onProgressChanged: (controller, progress) {
+        setState(() => _loadingProgress = progress / 100.0);
+      },
+      onLoadStop: (controller, url) async {
+        final urlStr = url?.toString() ?? "";
+        await _injectBlobInterceptor(controller);
+        setState(() {
+          _urlController.text = urlStr;
+          _currentUrl = urlStr;
+          _displayDomain = _extractDomain(urlStr);
+          _isLoading = false;
+        });
+        _updateNavButtons();
+      },
+      onDownloadStartRequest: (controller, request) async {
+        await _handleDownload(request, controller);
+      },
     );
   }
 
@@ -544,7 +514,6 @@ class _BrowserPageState extends State<BrowserPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header
                 Row(
                   children: [
                     Container(
@@ -576,8 +545,6 @@ class _BrowserPageState extends State<BrowserPage>
                   ],
                 ),
                 const SizedBox(height: 12),
-
-                // ── Search bar on top ──
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -591,44 +558,29 @@ class _BrowserPageState extends State<BrowserPage>
                       ),
                     ],
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.search_rounded,
-                        color: GPColors.primaryMid,
-                        size: 20,
-                      ),
+                      Icon(Icons.search_rounded, color: GPColors.primaryMid, size: 20),
                       const SizedBox(width: 10),
                       Expanded(
                         child: TextField(
                           controller: _overlaySearchController,
                           keyboardType: TextInputType.url,
                           textInputAction: TextInputAction.go,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: GPColors.textPrimary,
-                          ),
+                          style: const TextStyle(fontSize: 13, color: GPColors.textPrimary),
                           decoration: const InputDecoration(
                             border: InputBorder.none,
                             isDense: true,
                             contentPadding: EdgeInsets.zero,
                             hintText: 'Type a URL or search anything…',
-                            hintStyle: TextStyle(
-                              color: GPColors.textMuted,
-                              fontSize: 13,
-                            ),
+                            hintStyle: TextStyle(color: GPColors.textMuted, fontSize: 13),
                           ),
                           onSubmitted: (val) {
                             if (val.trim().isEmpty) return;
                             _overlaySearchController.clear();
                             _controller?.loadUrl(
-                              urlRequest: URLRequest(
-                                url: WebUri(_smartUrl(val)),
-                              ),
+                              urlRequest: URLRequest(url: WebUri(_smartUrl(val))),
                             );
                           },
                         ),
@@ -643,10 +595,7 @@ class _BrowserPageState extends State<BrowserPage>
                           );
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
                             color: GPColors.primary,
                             borderRadius: BorderRadius.circular(8),
@@ -665,160 +614,34 @@ class _BrowserPageState extends State<BrowserPage>
                   ),
                 ),
                 const SizedBox(height: 14),
-
-                // ── Banking ──
                 _sectionLabel('Banking'),
-                _quickTile(
-                  Icons.account_balance_rounded,
-                  'HDFC Bank',
-                  'netbanking.hdfcbank.com',
-                  'https://netbanking.hdfcbank.com',
-                ),
-                _quickTile(
-                  Icons.account_balance_rounded,
-                  'SBI Net Banking',
-                  'onlinesbi.sbi.in',
-                  'https://www.onlinesbi.sbi.in',
-                ),
-                _quickTile(
-                  Icons.account_balance_rounded,
-                  'ICICI Bank',
-                  'icicibank.com',
-                  'https://www.icicibank.com/online/accounts',
-                ),
-                _quickTile(
-                  Icons.account_balance_rounded,
-                  'Axis Bank',
-                  'axisbank.com',
-                  'https://www.axisbank.com/online-banking',
-                ),
-                _quickTile(
-                  Icons.account_balance_rounded,
-                  'Kotak Bank',
-                  'kotak.com',
-                  'https://netbanking.kotak.com',
-                ),
-                _quickTile(
-                  Icons.credit_card_rounded,
-                  'Credit Card Stmt',
-                  'Download statements',
-                  'https://www.google.com/search?q=credit+card+statement+download',
-                ),
-
-                // ── Government ──
+                _quickTile(Icons.account_balance_rounded, 'HDFC Bank', 'netbanking.hdfcbank.com', 'https://netbanking.hdfcbank.com'),
+                _quickTile(Icons.account_balance_rounded, 'SBI Net Banking', 'onlinesbi.sbi.in', 'https://www.onlinesbi.sbi.in'),
+                _quickTile(Icons.account_balance_rounded, 'ICICI Bank', 'icicibank.com', 'https://www.icicibank.com/online/accounts'),
+                _quickTile(Icons.account_balance_rounded, 'Axis Bank', 'axisbank.com', 'https://www.axisbank.com/online-banking'),
+                _quickTile(Icons.account_balance_rounded, 'Kotak Bank', 'kotak.com', 'https://netbanking.kotak.com'),
+                _quickTile(Icons.credit_card_rounded, 'Credit Card Stmt', 'Download statements', 'https://www.google.com/search?q=credit+card+statement+download'),
                 _sectionLabel('Government & Identity'),
-                _quickTile(
-                  Icons.badge_rounded,
-                  'DigiLocker',
-                  'digilocker.gov.in',
-                  'https://digilocker.gov.in',
-                ),
-                _quickTile(
-                  Icons.fingerprint_rounded,
-                  'Aadhaar / UIDAI',
-                  'myaadhaar.uidai.gov.in',
-                  'https://myaadhaar.uidai.gov.in',
-                ),
-                _quickTile(
-                  Icons.receipt_long_rounded,
-                  'Income Tax',
-                  'incometax.gov.in',
-                  'https://www.incometax.gov.in',
-                ),
-                _quickTile(
-                  Icons.credit_score_rounded,
-                  'PAN Services',
-                  'tin.tin.nsdl.com',
-                  'https://www.tin.nsdl.com',
-                ),
-                _quickTile(
-                  Icons.directions_car_rounded,
-                  'Parivahan',
-                  'DL & RC documents',
-                  'https://parivahan.gov.in',
-                ),
-                _quickTile(
-                  Icons.home_work_rounded,
-                  'GST Portal',
-                  'gst.gov.in',
-                  'https://www.gst.gov.in',
-                ),
-                _quickTile(
-                  Icons.business_rounded,
-                  'MCA21',
-                  'Company filings',
-                  'https://www.mca.gov.in',
-                ),
-
-                // ── Finance & Credit ──
+                _quickTile(Icons.badge_rounded, 'DigiLocker', 'digilocker.gov.in', 'https://digilocker.gov.in'),
+                _quickTile(Icons.fingerprint_rounded, 'Aadhaar / UIDAI', 'myaadhaar.uidai.gov.in', 'https://myaadhaar.uidai.gov.in'),
+                _quickTile(Icons.receipt_long_rounded, 'Income Tax', 'incometax.gov.in', 'https://www.incometax.gov.in'),
+                _quickTile(Icons.credit_score_rounded, 'PAN Services', 'tin.tin.nsdl.com', 'https://www.tin.nsdl.com'),
+                _quickTile(Icons.directions_car_rounded, 'Parivahan', 'DL & RC documents', 'https://parivahan.gov.in'),
+                _quickTile(Icons.home_work_rounded, 'GST Portal', 'gst.gov.in', 'https://www.gst.gov.in'),
+                _quickTile(Icons.business_rounded, 'MCA21', 'Company filings', 'https://www.mca.gov.in'),
                 _sectionLabel('Finance & Credit'),
-                _quickTile(
-                  Icons.credit_score_rounded,
-                  'CIBIL Score',
-                  'cibil.com',
-                  'https://www.cibil.com',
-                ),
-                _quickTile(
-                  Icons.trending_up_rounded,
-                  'NSDL / CDSL',
-                  'Demat & holdings',
-                  'https://www.nsdl.co.in',
-                ),
-                _quickTile(
-                  Icons.savings_rounded,
-                  'EPFO / PF',
-                  'passbook.epfindia.gov.in',
-                  'https://passbook.epfindia.gov.in',
-                ),
-                _quickTile(
-                  Icons.account_balance_wallet_rounded,
-                  'NSE / BSE',
-                  'Stock exchange portals',
-                  'https://www.nseindia.com',
-                ),
-
-                // ── Insurance ──
+                _quickTile(Icons.credit_score_rounded, 'CIBIL Score', 'cibil.com', 'https://www.cibil.com'),
+                _quickTile(Icons.trending_up_rounded, 'NSDL / CDSL', 'Demat & holdings', 'https://www.nsdl.co.in'),
+                _quickTile(Icons.savings_rounded, 'EPFO / PF', 'passbook.epfindia.gov.in', 'https://passbook.epfindia.gov.in'),
+                _quickTile(Icons.account_balance_wallet_rounded, 'NSE / BSE', 'Stock exchange portals', 'https://www.nseindia.com'),
                 _sectionLabel('Insurance'),
-                _quickTile(
-                  Icons.health_and_safety_rounded,
-                  'LIC',
-                  'licindia.in',
-                  'https://licindia.in',
-                ),
-                _quickTile(
-                  Icons.security_rounded,
-                  'IRDAI',
-                  'Insurance regulator',
-                  'https://www.irdai.gov.in',
-                ),
-                _quickTile(
-                  Icons.local_hospital_rounded,
-                  'Health Insurance',
-                  'Download policy docs',
-                  'https://www.google.com/search?q=health+insurance+policy+download',
-                ),
-
-                // ── Loans ──
+                _quickTile(Icons.health_and_safety_rounded, 'LIC', 'licindia.in', 'https://licindia.in'),
+                _quickTile(Icons.security_rounded, 'IRDAI', 'Insurance regulator', 'https://www.irdai.gov.in'),
+                _quickTile(Icons.local_hospital_rounded, 'Health Insurance', 'Download policy docs', 'https://www.google.com/search?q=health+insurance+policy+download'),
                 _sectionLabel('Loans'),
-                _quickTile(
-                  Icons.home_rounded,
-                  'Home Loan Stmt',
-                  'Download statement',
-                  'https://www.google.com/search?q=home+loan+statement+download',
-                ),
-                _quickTile(
-                  Icons.directions_car_rounded,
-                  'Car Loan Stmt',
-                  'Download statement',
-                  'https://www.google.com/search?q=car+loan+statement+download',
-                ),
-                _quickTile(
-                  Icons.school_rounded,
-                  'Education Loan',
-                  'Download statement',
-                  'https://www.google.com/search?q=education+loan+statement+download',
-                ),
-
+                _quickTile(Icons.home_rounded, 'Home Loan Stmt', 'Download statement', 'https://www.google.com/search?q=home+loan+statement+download'),
+                _quickTile(Icons.directions_car_rounded, 'Car Loan Stmt', 'Download statement', 'https://www.google.com/search?q=car+loan+statement+download'),
+                _quickTile(Icons.school_rounded, 'Education Loan', 'Download statement', 'https://www.google.com/search?q=education+loan+statement+download'),
                 const SizedBox(height: 20),
               ],
             ),
@@ -845,8 +668,7 @@ class _BrowserPageState extends State<BrowserPage>
 
   Widget _quickTile(IconData icon, String title, String subtitle, String url) {
     return GestureDetector(
-      onTap: () =>
-          _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(url))),
+      onTap: () => _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(url))),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -1009,20 +831,20 @@ class _BrowserPageState extends State<BrowserPage>
   Future<void> _injectBlobInterceptor(InAppWebViewController controller) async {
     await controller.evaluateJavascript(
       source: """
-      (function() {
-        window.blobCache = window.blobCache || {};
-        const orig = URL.createObjectURL;
-        URL.createObjectURL = function(blob) {
-          const url = orig.call(this, blob);
-          if (blob instanceof Blob) {
-            const r = new FileReader();
-            r.onloadend = () => { window.blobCache[url] = r.result.split(',')[1]; };
-            r.readAsDataURL(blob);
-          }
-          return url;
-        };
-      })();
-    """,
+        (function() {
+          window.blobCache = window.blobCache || {};
+          const orig = URL.createObjectURL;
+          URL.createObjectURL = function(blob) {
+            const url = orig.call(this, blob);
+            if (blob instanceof Blob) {
+              const r = new FileReader();
+              r.onloadend = () => { window.blobCache[url] = r.result.split(',')[1]; };
+              r.readAsDataURL(blob);
+            }
+            return url;
+          };
+        })();
+      """,
     );
   }
 
@@ -1126,6 +948,7 @@ class _BrowserPageState extends State<BrowserPage>
     }
   }
 
+  // ✅ FIXED METHOD
   Future<File> _downloadBlobUrl(
     DownloadStartRequest request,
     InAppWebViewController controller,
@@ -1137,34 +960,32 @@ class _BrowserPageState extends State<BrowserPage>
     final fileName = request.suggestedFilename ?? "downloaded_file";
 
     var result = await controller.evaluateJavascript(
-      source:
-          """
-      (function() {
-        if (window.blobCache && window.blobCache['$blobUrl']) return window.blobCache['$blobUrl'];
-        return null;
-      })();
-    """,
+      source: """
+        (function() {
+          if (window.blobCache && window.blobCache['$blobUrl']) return window.blobCache['$blobUrl'];
+          return null;
+        })();
+      """,
     );
 
     if (result == null || result.toString() == 'null') {
       result = await controller.evaluateJavascript(
-        source:
-            """
-        (async function() {
-          try {
-            const resp = await fetch('$blobUrl');
-            if (!resp.ok) return 'ERROR: HTTP ' + resp.status;
-            const blob = await resp.blob();
-            if (blob.size === 0) return 'ERROR: Empty blob';
-            return new Promise((res, rej) => {
-              const r = new FileReader();
-              r.onloadend = () => res(r.result.split(',')[1]);
-              r.onerror = () => rej('FileReader error');
-              r.readAsDataURL(blob);
-            });
-          } catch (e) { return 'ERROR: ' + e.message; }
-        })();
-      """,
+        source: """
+          (async function() {
+            try {
+              const resp = await fetch('$blobUrl');
+              if (!resp.ok) return 'ERROR: HTTP ' + resp.status;
+              const blob = await resp.blob();
+              if (blob.size === 0) return 'ERROR: Empty blob';
+              return new Promise((res, rej) => {
+                const r = new FileReader();
+                r.onloadend = () => res(r.result.split(',')[1]);
+                r.onerror = () => rej('FileReader error');
+                r.readAsDataURL(blob);
+              });
+            } catch (e) { return 'ERROR: ' + e.message; }
+          })();
+        """,
       );
     }
 
@@ -1183,10 +1004,16 @@ class _BrowserPageState extends State<BrowserPage>
       finalBytes = await _checkPdf(finalBytes);
     }
 
-    final encryptedBytes = await _encryptionService.encryptFile(finalBytes);
-    return _saveEncryptedFile(finalBytes, fileName);
+    // ✅ FIXED: Pass bytes and named parameters
+    return _saveEncryptedFile(
+      finalBytes,
+      fileName,
+      sourceUrl: _currentUrl,
+      fetchedUrl: blobUrl,
+    );
   }
 
+  // ✅ FIXED METHOD
   Future<File> _saveToDownloads(DownloadStartRequest request) async {
     if (!await _requestStoragePermission()) {
       throw Exception('Storage permission denied');
@@ -1200,10 +1027,18 @@ class _BrowserPageState extends State<BrowserPage>
     var finalBytes = Uint8List.fromList(bytes);
     if (fileName.toLowerCase().endsWith('.pdf') &&
         PdfUnlocker.isPasswordProtected(finalBytes)) {
-      _showSnackBar('ℹ️ Password-protected PDF. Enter password when viewing.');
+      _showSnackBar(
+        'ℹ️ Password-protected PDF. Enter password when viewing.',
+      );
     }
-    final encryptedBytes = await _encryptionService.encryptFile(finalBytes);
-    return _saveEncryptedFile(finalBytes, fileName);
+
+    // ✅ FIXED: Pass bytes and named parameters
+    return _saveEncryptedFile(
+      finalBytes,
+      fileName,
+      sourceUrl: _currentUrl,
+      fetchedUrl: request.url.toString(),
+    );
   }
 
   Future<Uint8List> _checkPdf(Uint8List pdfBytes) async {
@@ -1218,53 +1053,72 @@ class _BrowserPageState extends State<BrowserPage>
     return pdfBytes;
   }
 
- // Update this function to save encrypted files in a dedicated "GenuPortDownloads" folder on both Android and iOS, with proper permission handling and user feedback.
+  // ✅ FIXED METHOD
   Future<File> _saveEncryptedFile(
-  Uint8List originalBytes,  // now takes ORIGINAL bytes, not pre-encrypted
-  String fileName, {
-  String sourceUrl = '',
-  String fetchedUrl = '',
-}) async {
-  // Build and embed metadata
-  final meta = FileMetadata.create(
-    fileName:      fileName,
-    sourceUrl:     sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
-    fetchedUrl:    fetchedUrl,
-    originalBytes: originalBytes,
-  );
-  final encryptedBytes = await _encryptionService.encryptFile(
-    originalBytes,
-    metadata: meta.toJson(),
-  );
+    Uint8List fileBytes,  // ✅ Original unencrypted bytes
+    String fileName, {
+    String sourceUrl = '',
+    String fetchedUrl = '',
+  }) async {
+    debugPrint('💾 [SAVE] Starting save: $fileName');
+    debugPrint('   Original size: ${fileBytes.length} bytes');
+    debugPrint('   Source URL: $sourceUrl');
+    debugPrint('   Fetched URL: $fetchedUrl');
 
-  Directory directory;
-  if (Platform.isAndroid) {
-    directory = Directory('/storage/emulated/0/Download/GenuPortDownloads');
-    if (!await directory.exists()) await directory.create(recursive: true);
-  } else if (Platform.isIOS) {
-    final docDir = await getApplicationDocumentsDirectory();
-    directory = Directory('${docDir.path}/GenuPortDownloads');
-    if (!await directory.exists()) await directory.create(recursive: true);
-  } else {
-    throw Exception('Unsupported platform');
+    // Build metadata
+    final meta = FileMetadata.create(
+      fileName: fileName,
+      sourceUrl: sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
+      fetchedUrl: fetchedUrl,
+      originalBytes: fileBytes,
+    );
+
+    // Encrypt with metadata
+    final encryptedBytes = await _encryptionService.encryptFile(
+      fileBytes,
+      metadata: meta.toJson(),
+    );
+
+    debugPrint('🔒 [SAVE] Encrypted size: ${encryptedBytes.length} bytes');
+
+    // Determine directory
+    Directory directory;
+    if (Platform.isAndroid) {
+      directory = Directory('/storage/emulated/0/Download/GenuPortDownloads');
+      if (!await directory.exists()) await directory.create(recursive: true);
+      debugPrint('📁 [SAVE] Android directory: ${directory.path}');
+    } else if (Platform.isIOS) {
+      final docDir = await getApplicationDocumentsDirectory();
+      directory = Directory('${docDir.path}/GenuPortDownloads');
+      if (!await directory.exists()) await directory.create(recursive: true);
+      debugPrint('📁 [SAVE] iOS directory: ${directory.path}');
+    } else {
+      throw Exception('Unsupported platform');
+    }
+
+    // Always save as .pdf
+    String baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
+    String filePath = '${directory.path}/$baseName';
+
+    // Avoid duplicates
+    int counter = 1;
+    while (File(filePath).existsSync()) {
+      final parts = baseName.split('.');
+      final base = parts.sublist(0, parts.length - 1).join('.');
+      final ext = parts.last;
+      filePath = '${directory.path}/${base}_$counter.$ext';
+      counter++;
+    }
+
+    // Write encrypted file
+    final file = File(filePath);
+    await file.writeAsBytes(encryptedBytes);
+
+    debugPrint('✅ [SAVE] File saved: $filePath');
+    debugPrint('   Size: ${await file.length()} bytes');
+
+    return file;
   }
-
-  // Always .pdf extension
-  String baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
-  String filePath = '${directory.path}/$baseName';
-  int counter = 1;
-  while (File(filePath).existsSync()) {
-    final parts = baseName.split('.');
-    final base  = parts.sublist(0, parts.length - 1).join('.');
-    final ext   = parts.last;
-    filePath = '${directory.path}/${base}_$counter.$ext';
-    counter++;
-  }
-  final file = File(filePath);
-  await file.writeAsBytes(encryptedBytes);
-  return file;
-}
-
 
   @override
   void dispose() {

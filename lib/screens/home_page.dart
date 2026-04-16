@@ -5,11 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:genuport/services/encryption_service.dart';
 import 'package:genuport/services/pdf_unlocker.dart';
-import 'package:genuport/services/file_metadata.dart';
 import 'package:genuport/themes/gp_colors.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'downloads_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -69,6 +67,10 @@ class _HomePageState extends State<HomePage> {
       _currentUrl = '';
       _searchController.clear();
     });
+    // Reset webview to Google so history is cleared
+    _webController?.loadUrl(
+      urlRequest: URLRequest(url: WebUri('https://www.google.com')),
+    );
   }
 
   String _smartUrl(String input) {
@@ -144,7 +146,6 @@ class _HomePageState extends State<HomePage> {
   Future<dynamic> _downloadBlob(DownloadStartRequest req, InAppWebViewController ctrl) async {
     final blobUrl = req.url.toString();
     final fileName = req.suggestedFilename ?? 'file';
-    final sourceUrl = _currentUrl; // page the user was on when download started
     var result = await ctrl.evaluateJavascript(source: """
       (function(){
         if(window.blobCache&&window.blobCache['$blobUrl'])return window.blobCache['$blobUrl'];
@@ -174,15 +175,14 @@ class _HomePageState extends State<HomePage> {
     }
     if (result.toString().startsWith('ERROR:')) throw Exception(result.toString());
     final bytes = Uint8List.fromList(base64Decode(result.toString()));
-    return _saveFile(Uint8List(0), fileName, originalBytes: bytes, sourceUrl: sourceUrl, fetchedUrl: blobUrl);
+    final encrypted = await _encryptionService.encryptFile(bytes);
+    return _saveFile(encrypted, fileName);
   }
 
   Future<dynamic> _downloadHttp(DownloadStartRequest req) async {
     final fileName = req.suggestedFilename ?? 'file';
-    final sourceUrl = _currentUrl;
-    final fetchedUrl = req.url.toString();
     final client = HttpClient();
-    final r = await client.getUrl(Uri.parse(fetchedUrl));
+    final r = await client.getUrl(Uri.parse(req.url.toString()));
     final res = await r.close();
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final bytes = await consolidateHttpClientResponseBytes(res);
@@ -195,59 +195,33 @@ class _HomePageState extends State<HomePage> {
       }
     }
     final encrypted = await _encryptionService.encryptFile(finalBytes);
-    return _saveFile(Uint8List(0), fileName, originalBytes: finalBytes, sourceUrl: sourceUrl, fetchedUrl: fetchedUrl);
+    return _saveFile(encrypted, fileName);
   }
 
-Future<dynamic> _saveFile(
-  Uint8List encrypted, // NOTE: we re-encrypt below with metadata, ignore this param
-  String fileName, {
-  required Uint8List originalBytes,
-  required String sourceUrl,
-  required String fetchedUrl,
-}) async {
-  // Build metadata
-  final meta = FileMetadata.create(
-    fileName:      fileName,
-    sourceUrl:     sourceUrl.isNotEmpty ? sourceUrl : fetchedUrl,
-    fetchedUrl:    fetchedUrl,
-    originalBytes: originalBytes,
-  );
-
-  // Encrypt WITH embedded metadata
-  final encryptedWithMeta = await _encryptionService.encryptFile(
-    originalBytes,
-    metadata: meta.toJson(),
-  );
-
-  late Directory dir;
-  if (Platform.isAndroid) {
-    dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
-    if (!await dir.exists()) await dir.create(recursive: true);
-  } else {
-    final d = await getApplicationDocumentsDirectory();
-    dir = Directory('${d.path}/GenuPortDownloads');
-    if (!await dir.exists()) await dir.create(recursive: true);
+  Future<dynamic> _saveFile(Uint8List encrypted, String fileName) async {
+    late Directory dir;
+    if (Platform.isAndroid) {
+      dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
+      if (!await dir.exists()) await dir.create(recursive: true);
+    } else {
+      final d = await getApplicationDocumentsDirectory();
+      dir = Directory('${d.path}/GenuPortDownloads');
+      if (!await dir.exists()) await dir.create(recursive: true);
+    }
+    final finalName = fileName.endsWith('.enc') ? fileName : '$fileName.enc';
+    var path = '${dir.path}/$finalName';
+    int i = 1;
+    while (File(path).existsSync()) {
+      final parts = fileName.split('.');
+      path = parts.length > 1
+          ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}.enc'
+          : '${dir.path}/${fileName}_$i.enc';
+      i++;
+    }
+    final file = File(path);
+    await file.writeAsBytes(encrypted);
+    return file;
   }
-
-  // Save with .pdf extension
-  final baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
-  var path = '${dir.path}/$baseName';
-  int i = 1;
-  while (File(path).existsSync()) {
-    final parts = baseName.split('.');
-    path = parts.length > 1
-        ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}'
-        : '${dir.path}/${baseName}_$i';
-    i++;
-  }
-  final file = File(path);
-  await file.writeAsBytes(encryptedWithMeta);
-  print('💾 [METADATA] File saved with embedded metadata:');
-  print('   • Path: $path');
-  print('   • File size: ${file.lengthSync()} bytes (encrypted with metadata)');
-  print('   • Metadata embedded: ${meta.toJson()}');
-  return file;
-}
 
   @override
   void dispose() {
@@ -258,60 +232,76 @@ Future<dynamic> _saveFile(
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GPColors.surfacePage,
-      body: Column(children: [
-        _buildAppBar(),
-        if (_isLoading)
-          SizedBox(
-            height: 2,
-            child: LinearProgressIndicator(
-              value: _loadProgress > 0 ? _loadProgress : null,
-              backgroundColor: GPColors.border,
-              valueColor: const AlwaysStoppedAnimation(GPColors.primaryLight),
-            ),
-          ),
-        if (_status.isNotEmpty) _buildStatusBar(),
-        Expanded(
-          child: Stack(children: [
-            // ── WebView — always in tree, hidden when not active ──
-            Offstage(
-              offstage: !_webViewVisible,
-              child: InAppWebView(
-                initialUrlRequest: URLRequest(url: WebUri('https://www.google.com')),
-                initialSettings: InAppWebViewSettings(
-                  useOnDownloadStart: true,
-                  javaScriptEnabled: true,
-                  allowFileAccess: true,
-                  allowContentAccess: true,
-                ),
-                onWebViewCreated: (c) {
-                  _webController = c;
-                  _injectBlobInterceptor(c);
-                },
-                onLoadStart: (c, url) {
-                  final u = url?.toString() ?? '';
-                  setState(() { _isLoading = true; _loadProgress = 0; _currentUrl = u; });
-                  _updateNav();
-                },
-                onProgressChanged: (c, p) => setState(() => _loadProgress = p / 100),
-                onLoadStop: (c, url) async {
-                  await _injectBlobInterceptor(c);
-                  final u = url?.toString() ?? '';
-                  setState(() { _isLoading = false; _currentUrl = u; });
-                  if (!_webViewVisible && u != 'https://www.google.com/') {
-                    setState(() => _webViewVisible = true);
-                  }
-                  _updateNav();
-                },
-                onDownloadStartRequest: (c, req) => _handleDownload(req, c),
+    return PopScope(
+      // Intercept Android back button
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        if (_webViewVisible) {
+          final canGoBack = await _webController?.canGoBack() ?? false;
+          if (canGoBack) {
+            _webController?.goBack();
+          } else {
+            _goHome();
+          }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: GPColors.surfacePage,
+        body: Column(children: [
+          _buildAppBar(),
+          if (_isLoading)
+            SizedBox(
+              height: 2,
+              child: LinearProgressIndicator(
+                value: _loadProgress > 0 ? _loadProgress : null,
+                backgroundColor: GPColors.border,
+                valueColor: const AlwaysStoppedAnimation(GPColors.primaryLight),
               ),
             ),
-            // ── Dashboard — shown when no URL loaded ──
-            if (!_webViewVisible) _buildDashboard(),
-          ]),
-        ),
-      ]),
+          if (_status.isNotEmpty) _buildStatusBar(),
+          Expanded(
+            child: Stack(children: [
+              // ── WebView — always in tree, hidden when not active ──
+              Offstage(
+                offstage: !_webViewVisible,
+                child: InAppWebView(
+                  initialUrlRequest: URLRequest(url: WebUri('https://www.google.com')),
+                  initialSettings: InAppWebViewSettings(
+                    useOnDownloadStart: true,
+                    javaScriptEnabled: true,
+                    allowFileAccess: true,
+                    allowContentAccess: true,
+                  ),
+                  onWebViewCreated: (c) {
+                    _webController = c;
+                    _injectBlobInterceptor(c);
+                  },
+                  onLoadStart: (c, url) {
+                    final u = url?.toString() ?? '';
+                    // Don't show webview for the initial Google load
+                    if (u == 'https://www.google.com/' || u == 'https://www.google.com') {
+                      if (!_webViewVisible) return;
+                    }
+                    setState(() { _isLoading = true; _loadProgress = 0; _currentUrl = u; });
+                    _updateNav();
+                  },
+                  onProgressChanged: (c, p) => setState(() => _loadProgress = p / 100),
+                  onLoadStop: (c, url) async {
+                    await _injectBlobInterceptor(c);
+                    final u = url?.toString() ?? '';
+                    setState(() { _isLoading = false; _currentUrl = u; });
+                    _updateNav();
+                  },
+                  onDownloadStartRequest: (c, req) => _handleDownload(req, c),
+                ),
+              ),
+              // ── Dashboard — shown when no URL loaded ──
+              if (!_webViewVisible) _buildDashboard(),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -336,8 +326,10 @@ Future<dynamic> _saveFile(
             IconButton(
               icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white, size: 18),
               onPressed: () async {
-                if (_canGoBack) {
+                final canGoBack = await _webController?.canGoBack() ?? false;
+                if (canGoBack) {
                   await _webController?.goBack();
+                  _updateNav();
                 } else {
                   _goHome();
                 }
@@ -358,10 +350,36 @@ Future<dynamic> _saveFile(
           const SizedBox(width: 10),
           Expanded(
             child: _webViewVisible
-                ? Text(
-                    _domain(_currentUrl),
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
+                ? Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _domain(_currentUrl),
+                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Home button when in webview
+                      GestureDetector(
+                        onTap: _goHome,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withOpacity(0.2)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.home_rounded, color: Colors.white, size: 14),
+                              SizedBox(width: 4),
+                              Text('Home', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   )
                 : const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,15 +390,10 @@ Future<dynamic> _saveFile(
                   ),
           ),
           if (_webViewVisible) ...[
+            const SizedBox(width: 8),
             IconButton(
               icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
               onPressed: () => _webController?.reload(),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            ),
-            IconButton(
-              icon: const Icon(Icons.folder_outlined, color: Colors.white, size: 20),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsPage())),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),

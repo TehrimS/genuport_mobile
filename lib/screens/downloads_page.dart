@@ -36,29 +36,54 @@ class _DownloadsPageState extends State<DownloadsPage> {
     }
   }
 
-Future<List<File>> _getFiles() async {
+  Future<List<File>> _getFiles() async {
   Directory dir;
   if (Platform.isAndroid) {
     dir = Directory('/storage/emulated/0/Download/GenuPortDownloads');
+    print('📁 Looking for downloads in: ${dir.path}');
   } else if (Platform.isIOS) {
     final docDir = await getApplicationDocumentsDirectory();
     dir = Directory('${docDir.path}/GenuPortDownloads');
+    print('📁 Looking for downloads in: ${dir.path}');
   } else {
     return [];
   }
-  if (!await dir.exists()) return [];
+
+  if (!await dir.exists()) {
+    print('⚠️ Directory does not exist, creating...');
+    try {
+      await dir.create(recursive: true);
+      print('✅ Created: ${dir.path}');
+    } catch (e) {
+      print('❌ Failed to create: $e');
+    }
+    return [];
+  }
+
   try {
-    return dir
-        .listSync()
+    final files = dir.listSync();
+    print('✅ Found ${files.length} total items in directory');
+    
+    final pdfFiles = files
         .whereType<File>()
-        .where((f) => f.path.endsWith('.pdf')) // only our encrypted PDFs
+        .where((f) {
+          final name = f.path.split('/').last;
+          final isPdf = f.path.endsWith('.pdf');
+          print('   - $name (PDF: $isPdf)');
+          return isPdf;
+        })
         .toList()
           ..sort((a, b) =>
               b.statSync().modified.compareTo(a.statSync().modified));
-  } catch (_) {
+
+    print('📄 Found ${pdfFiles.length} PDF files');
+    return pdfFiles;
+  } catch (e) {
+    print('❌ Error listing files: $e');
     return [];
   }
 }
+
   String _formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
@@ -76,8 +101,8 @@ Future<List<File>> _getFiles() async {
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  String _displayName(String fileName) =>
-      fileName.endsWith('.enc') ? fileName.substring(0, fileName.length - 4) : fileName;
+  // All files stored are encrypted — display name is just the filename
+  String _displayName(String fileName) => fileName;
 
   bool _isPdf(String name) => name.toLowerCase().endsWith('.pdf');
 
@@ -158,7 +183,7 @@ Future<List<File>> _getFiles() async {
   Future<String?> _askPdfPassword() async {
     final tc = TextEditingController();
     bool isPasswordVisible = false;
-    
+
     return showDialog<String>(
       context: context,
       barrierDismissible: false,
@@ -176,7 +201,6 @@ Future<List<File>> _getFiles() async {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Header ──
                   Row(
                     children: [
                       Container(
@@ -194,10 +218,7 @@ Future<List<File>> _getFiles() async {
                         children: [
                           Text(
                             'PDF Password',
-                            style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700,
-                              color: GPColors.textPrimary,
-                            ),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GPColors.textPrimary),
                           ),
                           Text(
                             'This document is protected',
@@ -208,8 +229,6 @@ Future<List<File>> _getFiles() async {
                     ],
                   ),
                   const SizedBox(height: 20),
-
-                  // ── Input ──
                   TextField(
                     controller: tc,
                     obscureText: !isPasswordVisible,
@@ -225,32 +244,17 @@ Future<List<File>> _getFiles() async {
                           color: GPColors.primaryMid,
                           size: 18,
                         ),
-                        onPressed: () {
-                          setState(() {
-                            isPasswordVisible = !isPasswordVisible;
-                          });
-                        },
+                        onPressed: () => setState(() => isPasswordVisible = !isPasswordVisible),
                       ),
                       filled: true,
                       fillColor: GPColors.surfaceTint,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: GPColors.border),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: GPColors.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: GPColors.primaryLight, width: 1.5),
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: GPColors.border)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: GPColors.border)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: GPColors.primaryLight, width: 1.5)),
                     ),
                   ),
                   const SizedBox(height: 12),
-
-                  // ── Hint box ──
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -262,19 +266,11 @@ Future<List<File>> _getFiles() async {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Icon(Icons.info_outline_rounded, size: 13, color: GPColors.primaryLight),
-                            const SizedBox(width: 5),
-                            const Text(
-                              'Common bank passwords',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 12,
-                                color: GPColors.primaryMid,
-                              ),
-                            ),
-                          ],
-                        ),
+                        Row(children: [
+                          Icon(Icons.info_outline_rounded, size: 13, color: GPColors.primaryLight),
+                          const SizedBox(width: 5),
+                          const Text('Common bank passwords', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: GPColors.primaryMid)),
+                        ]),
                         const SizedBox(height: 6),
                         const Text('• Date of Birth: DDMMYYYY', style: TextStyle(fontSize: 12, color: GPColors.textMuted)),
                         const Text('• PAN Card number', style: TextStyle(fontSize: 12, color: GPColors.textMuted)),
@@ -283,45 +279,41 @@ Future<List<File>> _getFiles() async {
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // ── Actions ──
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context, null),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: GPColors.textMuted,
-                            side: const BorderSide(color: GPColors.border),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                          ),
-                          child: const Text('Cancel', style: TextStyle(fontSize: 14)),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context, null),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: GPColors.textMuted,
+                          side: const BorderSide(color: GPColors.border),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: const Text('Cancel', style: TextStyle(fontSize: 14)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context, tc.text),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: GPColors.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.lock_open_rounded, size: 15),
+                            SizedBox(width: 6),
+                            Text('Unlock', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(context, tc.text),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: GPColors.primary,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.lock_open_rounded, size: 15),
-                              SizedBox(width: 6),
-                              Text('Unlock', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ]),
                 ],
               ),
             ),
@@ -346,10 +338,7 @@ Future<List<File>> _getFiles() async {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
-                  width: 22, height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: GPColors.primaryLight),
-                ),
+                const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: GPColors.primaryLight)),
                 const SizedBox(width: 16),
                 Text(msg, style: const TextStyle(color: GPColors.textPrimary, fontSize: 14)),
               ],
@@ -374,46 +363,48 @@ Future<List<File>> _getFiles() async {
       final fileBytes = await file.readAsBytes();
       final isEncrypted = _encryptionService.isFileEncrypted(fileBytes);
 
-      Uint8List pdfBytes = fileBytes;
+      Uint8List pdfBytes;
 
       if (isEncrypted) {
         if (!_isInitialized) throw Exception('Encryption service not initialized');
         pdfBytes = await _encryptionService.decryptFile(fileBytes);
+      } else {
+        pdfBytes = fileBytes;
+      }
 
-        if (PdfUnlocker.isPasswordProtected(pdfBytes)) {
+      // Check if the PDF is password protected
+      if (PdfUnlocker.isPasswordProtected(pdfBytes)) {
+        if (context.mounted) Navigator.pop(context); // dismiss decrypting dialog
+
+        // Ask user for password — NO auto-unlock attempt
+        final password = await _askPdfPassword();
+        if (password == null || password.isEmpty) return;
+
+        if (context.mounted) _showLoadingDialog('Unlocking PDF…');
+
+        // Only try the password the user entered
+        final unlockedBytes = await PdfUnlocker.unlockPdf(pdfBytes, password);
+
+        if (unlockedBytes == null) {
           if (context.mounted) Navigator.pop(context);
-
-          final password = await _askPdfPassword();
-          if (password == null || password.isEmpty) return;
-
-          if (context.mounted) _showLoadingDialog('Unlocking PDF…');
-
-          var unlockedBytes = await PdfUnlocker.unlockPdf(pdfBytes, password);
-          unlockedBytes ??= await PdfUnlocker.tryUnlockWithCommonPasswords(
-            pdfBytes,
-            dob: password,
-            pan: password,
-          );
-
-          if (unlockedBytes == null) {
-            if (context.mounted) Navigator.pop(context);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('❌ Wrong password. Cannot unlock PDF.'),
-                  backgroundColor: Color(0xFFE53935),
-                ),
-              );
-            }
-            return;
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('❌ Wrong password. Cannot unlock PDF.'),
+                backgroundColor: Color(0xFFE53935),
+              ),
+            );
           }
-
-          pdfBytes = unlockedBytes;
-          try {
-            final reEncrypted = await _encryptionService.encryptFile(pdfBytes);
-            await file.writeAsBytes(reEncrypted);
-          } catch (_) {}
+          return;
         }
+
+        pdfBytes = unlockedBytes;
+
+        // Re-encrypt the now-unlocked PDF so it opens directly next time
+        try {
+          final reEncrypted = await _encryptionService.encryptFile(pdfBytes);
+          await file.writeAsBytes(reEncrypted);
+        } catch (_) {}
       }
 
       if (context.mounted) Navigator.pop(context);
@@ -442,41 +433,30 @@ Future<List<File>> _getFiles() async {
         backgroundColor: GPColors.surface,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        // ── REMOVED back button from leading when not selecting ──
         automaticallyImplyLeading: false,
         leading: _isSelecting
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_ios_rounded, color: GPColors.primaryMid, size: 20),
-                onPressed: () {
-                  setState(() { _isSelecting = false; _selectedPaths.clear(); });
-                },
+                onPressed: () => setState(() { _isSelecting = false; _selectedPaths.clear(); }),
               )
             : null,
         title: _isSelecting
             ? Text(
                 '${_selectedPaths.length} selected',
-                style: const TextStyle(
-                  color: GPColors.primary, fontWeight: FontWeight.w600, fontSize: 16,
-                ),
+                style: const TextStyle(color: GPColors.primary, fontWeight: FontWeight.w600, fontSize: 16),
               )
             : Row(
                 children: [
                   Container(
                     width: 28, height: 28,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [GPColors.primaryMid, GPColors.primary],
-                        begin: Alignment.topLeft, end: Alignment.bottomRight,
-                      ),
+                      gradient: const LinearGradient(colors: [GPColors.primaryMid, GPColors.primary], begin: Alignment.topLeft, end: Alignment.bottomRight),
                       borderRadius: BorderRadius.circular(7),
                     ),
                     child: const Icon(Icons.shield_rounded, color: Colors.white, size: 16),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Downloads',
-                    style: TextStyle(color: GPColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 17),
-                  ),
+                  const Text('Downloads', style: TextStyle(color: GPColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 17)),
                 ],
               ),
         bottom: PreferredSize(
@@ -503,20 +483,15 @@ Future<List<File>> _getFiles() async {
         future: _getFiles(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(color: GPColors.primaryLight),
-            );
+            return const Center(child: CircularProgressIndicator(color: GPColors.primaryLight));
           }
 
           final files = snapshot.data!;
 
-          if (files.isEmpty) {
-            return _buildEmptyState();
-          }
+          if (files.isEmpty) return _buildEmptyState();
 
           return Column(
             children: [
-              // Header
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 color: GPColors.surfaceTint,
@@ -532,10 +507,7 @@ Future<List<File>> _getFiles() async {
                     if (!_isSelecting)
                       GestureDetector(
                         onTap: () => setState(() => _isSelecting = true),
-                        child: const Text(
-                          'Select',
-                          style: TextStyle(fontSize: 12, color: GPColors.primaryMid, fontWeight: FontWeight.w600),
-                        ),
+                        child: const Text('Select', style: TextStyle(fontSize: 12, color: GPColors.primaryMid, fontWeight: FontWeight.w600)),
                       )
                     else
                       GestureDetector(
@@ -556,7 +528,6 @@ Future<List<File>> _getFiles() async {
                   ],
                 ),
               ),
-
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -565,15 +536,8 @@ Future<List<File>> _getFiles() async {
                     final file = files[index];
                     final fileName = file.path.split('/').last;
                     final displayName = _displayName(fileName);
-                    final isEncrypted = fileName.endsWith('.enc');
                     final isSelected = _selectedPaths.contains(file.path);
-
-                    return _buildFileCard(
-                      file: file,
-                      displayName: displayName,
-                      isEncrypted: isEncrypted,
-                      isSelected: isSelected,
-                    );
+                    return _buildFileCard(file: file, displayName: displayName, isSelected: isSelected);
                   },
                 ),
               ),
@@ -587,12 +551,10 @@ Future<List<File>> _getFiles() async {
   Widget _buildFileCard({
     required File file,
     required String displayName,
-    required bool isEncrypted,
     required bool isSelected,
   }) {
     final size = _formatSize(file.lengthSync());
     final date = _formatDate(file.statSync().modified);
-    final isPdf = _isPdf(displayName);
 
     return Dismissible(
       key: Key(file.path),
@@ -602,7 +564,7 @@ Future<List<File>> _getFiles() async {
         setState(() {});
       },
       confirmDismiss: (_) async {
-        final confirm = await showDialog<bool>(
+        return await showDialog<bool>(
           context: context,
           barrierColor: Colors.black.withOpacity(0.45),
           builder: (_) => Dialog(
@@ -661,15 +623,11 @@ Future<List<File>> _getFiles() async {
               ),
             ),
           ),
-        );
-        return confirm ?? false;
+        ) ?? false;
       },
       background: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFEBEE),
-          borderRadius: BorderRadius.circular(14),
-        ),
+        decoration: BoxDecoration(color: const Color(0xFFFFEBEE), borderRadius: BorderRadius.circular(14)),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         child: const Column(
@@ -713,18 +671,14 @@ Future<List<File>> _getFiles() async {
               width: isSelected ? 1.5 : 1,
             ),
             boxShadow: isSelected ? [] : [
-              BoxShadow(
-                color: GPColors.primary.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
+              BoxShadow(color: GPColors.primary.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
-                // File icon
+                // File icon / selection circle
                 if (_isSelecting)
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
@@ -740,40 +694,15 @@ Future<List<File>> _getFiles() async {
                     ),
                   )
                 else
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 40, height: 44,
-                        decoration: BoxDecoration(
-                          color: isPdf
-                              ? const Color(0xFFFFF3E0)
-                              : GPColors.surfaceTint,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isPdf ? const Color(0xFFFFCC80) : GPColors.border,
-                          ),
-                        ),
-                        child: Icon(
-                          isPdf ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded,
-                          color: isPdf ? Colors.orange.shade700 : GPColors.primaryMid,
-                          size: 22,
-                        ),
-                      ),
-                      if (isEncrypted)
-                        Positioned(
-                          right: -4, bottom: -4,
-                          child: Container(
-                            width: 18, height: 18,
-                            decoration: BoxDecoration(
-                              color: GPColors.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 1.5),
-                            ),
-                            child: const Icon(Icons.lock_rounded, size: 10, color: Colors.white),
-                          ),
-                        ),
-                    ],
+                  // Simple PDF icon — no lock badge since all files are encrypted
+                  Container(
+                    width: 40, height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3E0),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFFFCC80)),
+                    ),
+                    child: Icon(Icons.picture_as_pdf_rounded, color: Colors.orange.shade700, size: 22),
                   ),
 
                 const SizedBox(width: 12),
@@ -787,45 +716,19 @@ Future<List<File>> _getFiles() async {
                         displayName,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: GPColors.textPrimary,
-                        ),
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: GPColors.textPrimary),
                       ),
                       const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Text(
-                            '$size · $date',
-                            style: const TextStyle(fontSize: 11.5, color: GPColors.textMuted),
-                          ),
-                          if (isEncrypted) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE8F5E9),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: GPColors.border),
-                              ),
-                              child: const Text(
-                                '🔒 Encrypted',
-                                style: TextStyle(
-                                  fontSize: 10, color: GPColors.primaryMid,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
+                      Text(
+                        '$size · $date',
+                        style: const TextStyle(fontSize: 11.5, color: GPColors.textMuted),
                       ),
                     ],
                   ),
                 ),
 
-                // Actions
-                if (!_isSelecting && isPdf)
+                // Open button
+                if (!_isSelecting)
                   GestureDetector(
                     onTap: () => _openFile(file, displayName),
                     child: Container(
@@ -835,13 +738,7 @@ Future<List<File>> _getFiles() async {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: GPColors.border),
                       ),
-                      child: const Text(
-                        'Open',
-                        style: TextStyle(
-                          fontSize: 12, color: GPColors.primaryMid,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      child: const Text('Open', style: TextStyle(fontSize: 12, color: GPColors.primaryMid, fontWeight: FontWeight.w600)),
                     ),
                   ),
               ],
@@ -867,12 +764,7 @@ Future<List<File>> _getFiles() async {
             child: const Icon(Icons.folder_open_rounded, size: 40, color: GPColors.accent),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'No downloads yet',
-            style: TextStyle(
-              fontSize: 18, fontWeight: FontWeight.w700, color: GPColors.textPrimary,
-            ),
-          ),
+          const Text('No downloads yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: GPColors.textPrimary)),
           const SizedBox(height: 8),
           const Text(
             'Files you download will appear here,\nencrypted and secured.',
@@ -892,10 +784,7 @@ Future<List<File>> _getFiles() async {
               children: [
                 Icon(Icons.shield_rounded, size: 14, color: GPColors.primaryLight),
                 SizedBox(width: 6),
-                Text(
-                  'All files are AES-256 encrypted',
-                  style: TextStyle(fontSize: 12, color: GPColors.primaryMid),
-                ),
+                Text('All files are AES-256 encrypted', style: TextStyle(fontSize: 12, color: GPColors.primaryMid)),
               ],
             ),
           ),
@@ -924,37 +813,25 @@ Future<List<File>> _getFiles() async {
                   Container(
                     width: 34, height: 34,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [GPColors.primaryMid, GPColors.primary],
-                        begin: Alignment.topLeft, end: Alignment.bottomRight,
-                      ),
+                      gradient: const LinearGradient(colors: [GPColors.primaryMid, GPColors.primary], begin: Alignment.topLeft, end: Alignment.bottomRight),
                       borderRadius: BorderRadius.circular(9),
                     ),
                     child: const Icon(Icons.shield_rounded, color: Colors.white, size: 18),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
-                    'Secure Downloads',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GPColors.textPrimary),
-                  ),
+                  const Text('Secure Downloads', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: GPColors.textPrimary)),
                 ]),
                 const SizedBox(height: 16),
                 Container(
-                  decoration: BoxDecoration(
-                    color: GPColors.surfaceTint,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: GPColors.border),
-                  ),
+                  decoration: BoxDecoration(color: GPColors.surfaceTint, borderRadius: BorderRadius.circular(12), border: Border.all(color: GPColors.border)),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Column(
-                    children: [
-                      _infoRow(Icons.folder_rounded, 'Saved to GenuPortDownloads'),
-                      _infoRow(Icons.lock_rounded, 'AES-256 encrypted at rest'),
-                      _infoRow(Icons.visibility_rounded, 'Decrypted only when viewing'),
-                      _infoRow(Icons.key_rounded, 'PDF passwords removed after unlock'),
-                      _infoRow(Icons.block_rounded, 'Cannot be opened by other apps'),
-                    ],
-                  ),
+                  child: Column(children: [
+                    _infoRow(Icons.folder_rounded, 'Saved to GenuPortDownloads'),
+                    _infoRow(Icons.lock_rounded, 'AES-256 encrypted at rest'),
+                    _infoRow(Icons.visibility_rounded, 'Decrypted only when viewing'),
+                    _infoRow(Icons.key_rounded, 'PDF passwords removed after unlock'),
+                    _infoRow(Icons.block_rounded, 'Cannot be opened by other apps'),
+                  ]),
                 ),
                 const SizedBox(height: 20),
                 SizedBox(
@@ -982,13 +859,11 @@ Future<List<File>> _getFiles() async {
   Widget _infoRow(IconData icon, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: GPColors.primaryLight),
-          const SizedBox(width: 10),
-          Text(text, style: const TextStyle(fontSize: 13, color: GPColors.textPrimary)),
-        ],
-      ),
+      child: Row(children: [
+        Icon(icon, size: 16, color: GPColors.primaryLight),
+        const SizedBox(width: 10),
+        Text(text, style: const TextStyle(fontSize: 13, color: GPColors.textPrimary)),
+      ]),
     );
   }
 }
