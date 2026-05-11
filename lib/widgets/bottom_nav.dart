@@ -29,11 +29,11 @@ class BottomNavState extends State<BottomNav> {
   void goToTab(int index) => setState(() => _currentIndex = index);
 
   // Pages kept alive with IndexedStack
-  final _pages = [
-    HomePage(),
-    DownloadsPage(),
-    ProfilePage(),
-  ];
+  List<Widget> get _pages => [
+        HomePage(),
+        DownloadsPage(),
+        ProfilePage(),
+      ];
 
   @override
   Widget build(BuildContext context) {

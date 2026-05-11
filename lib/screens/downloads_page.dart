@@ -67,8 +67,8 @@ class _DownloadsPageState extends State<DownloadsPage> {
     final pdfFiles = files
         .whereType<File>()
         .where((f) {
-          final name = f.path.split('/').last;
-          final isPdf = f.path.endsWith('.pdf');
+          final name = f.path.split('/').last.toLowerCase();
+          final isPdf = name.endsWith('.pdf') || name.endsWith('.pdf.enc');
           print('   - $name (PDF: $isPdf)');
           return isPdf;
         })
@@ -101,8 +101,13 @@ class _DownloadsPageState extends State<DownloadsPage> {
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  // All files stored are encrypted — display name is just the filename
-  String _displayName(String fileName) => fileName;
+  // All files stored are encrypted — show the original PDF filename
+  String _displayName(String fileName) {
+    if (fileName.toLowerCase().endsWith('.pdf.enc')) {
+      return fileName.substring(0, fileName.length - 4);
+    }
+    return fileName;
+  }
 
   bool _isPdf(String name) => name.toLowerCase().endsWith('.pdf');
 
@@ -362,12 +367,14 @@ class _DownloadsPageState extends State<DownloadsPage> {
     try {
       final fileBytes = await file.readAsBytes();
       final isEncrypted = _encryptionService.isFileEncrypted(fileBytes);
-
+      Map<String, dynamic> originalMeta = {};
       Uint8List pdfBytes;
 
       if (isEncrypted) {
         if (!_isInitialized) throw Exception('Encryption service not initialized');
-        pdfBytes = await _encryptionService.decryptFile(fileBytes);
+        final result = await _encryptionService.decryptFileWithMeta(fileBytes);
+        originalMeta = result.metadata;
+        pdfBytes = result.bytes;
       } else {
         pdfBytes = fileBytes;
       }
@@ -402,7 +409,10 @@ class _DownloadsPageState extends State<DownloadsPage> {
 
         // Re-encrypt the now-unlocked PDF so it opens directly next time
         try {
-          final reEncrypted = await _encryptionService.encryptFile(pdfBytes);
+          final reEncrypted = await _encryptionService.encryptFile(
+            pdfBytes,
+            metadata: originalMeta.isNotEmpty ? originalMeta : null,
+          );
           await file.writeAsBytes(reEncrypted);
         } catch (_) {}
       }
@@ -533,12 +543,17 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   itemCount: files.length,
                   itemBuilder: (context, index) {
-                    final file = files[index];
-                    final fileName = file.path.split('/').last;
-                    final displayName = _displayName(fileName);
-                    final isSelected = _selectedPaths.contains(file.path);
-                    return _buildFileCard(file: file, displayName: displayName, isSelected: isSelected);
-                  },
+  final file = files[index];
+  final fileName = file.path.split('/').last;
+  final displayName = _displayName(fileName);
+  final isSelected = _selectedPaths.contains(file.path);
+
+  return _buildFileCard(
+    file: file,
+    displayName: displayName,
+    isSelected: isSelected,
+  );
+},
                 ),
               ),
             ],

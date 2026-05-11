@@ -209,16 +209,6 @@ class _MyAppState extends State<MyApp> {
           debugPrint('📱 Now navigating to Downloads page...');
           if (navigatorKey.currentContext != null) {
             debugPrint('🎯 Pushing to Downloads page...');
-            // try {
-            //   Navigator.of(navigatorKey.currentContext!).pushAndRemoveUntil(
-            //     MaterialPageRoute(builder: (_) => const DownloadsPage()),
-            //     (route) => route.isFirst,
-            //   );
-            //   debugPrint('✅ Successfully navigated to Downloads page');
-            // } catch (navError) {
-            //   debugPrint('❌ Navigation error: $navError');
-            //   debugPrint('❌ Stack trace: $navError');
-            // }
           } else {
             debugPrint('⚠️ Navigator context not available at Downloads navigation time');
           }

@@ -152,7 +152,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
             borderRadius: BorderRadius.circular(11),
             border: Border.all(color: Colors.white.withOpacity(0.2)),
           ),
-          child: const Icon(Icons.shield_rounded, color: Colors.white, size: 20),
+          child: Image.asset('assets/genuPort.png', fit: BoxFit.contain),
         ),
         const SizedBox(width: 12),
         const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -41,11 +41,17 @@ class _FileMetadataSheetState extends State<FileMetadataSheet> {
       print('   • fetchedUrl: ${meta.fetchedUrl}');
       print('   • timestamp: ${meta.formattedTimestamp}');
       print('   • fileSize: ${meta.formattedSize}');
-      print('   • hash: ${meta.sha256Hash}');
+      print('   • sourceHash: ${meta.sourceHash.substring(0, 16)}...');
+      if (meta.unlockedHash != null) {
+        print('   • unlockedHash: ${meta.unlockedHash!.substring(0, 16)}...');
+      }
+      if (meta.unlockMethod != null) {
+        print('   • unlockMethod: ${meta.unlockMethod}');
+      }
       if (mounted) setState(() { _meta = meta; _loading = false; });
     } else {
       print('⚠️  [METADATA_SHEET] No metadata found in file');
-      if (mounted) setState(() { _loading = false; }); // no metadata
+      if (mounted) setState(() { _loading = false; });
     }
   } catch (e) {
     print('❌ [METADATA_SHEET] Error loading metadata: $e');

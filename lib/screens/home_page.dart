@@ -4,10 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:genuport/services/encryption_service.dart';
+import 'package:genuport/services/file_metadata.dart';
 import 'package:genuport/services/pdf_unlocker.dart';
+import 'package:genuport/services/trusted_sites.dart';
 import 'package:genuport/themes/gp_colors.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'downloads_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -22,13 +25,15 @@ class _HomePageState extends State<HomePage> {
   final _encryptionService = EncryptionService();
   final _urlFocusNode = FocusNode();
 
-  bool _webViewVisible = false;   // false = show home dashboard, true = show webview
+  bool _webViewVisible = false;
   bool _isLoading = false;
   double _loadProgress = 0;
-  bool _canGoBack = false;
   bool _encReady = false;
   String _status = '';
   String _currentUrl = '';
+  String _entryUrl = ''; // ✅ NEW: Track the original site user navigated to
+  String _selectedCountry = 'India';
+  bool _showDashboardLoading = false; // ✅ NEW: Track if loading from dashboard
 
   @override
   void initState() {
@@ -52,22 +57,38 @@ class _HomePageState extends State<HomePage> {
     return s2.isGranted;
   }
 
+  // ✅ UPDATED: Show loading overlay before navigating
   void _loadUrl(String url) {
     final uri = _smartUrl(url);
-    setState(() { _webViewVisible = true; _currentUrl = uri; });
-    _webController?.loadUrl(urlRequest: URLRequest(url: WebUri(uri)));
-    _searchController.text = uri;
-    _urlFocusNode.unfocus();
+    print('🌐 [NAV] User navigating to: $uri');
+    setState(() {
+      _showDashboardLoading = true; // Show loading overlay
+      _entryUrl = uri; // ✅ Save original URL user navigated to
+      print('✅ [NAV] Set _entryUrl = $uri');
+    });
+    
+    // Delay to show loading overlay, then navigate
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _webViewVisible = true;
+          _currentUrl = uri;
+        });
+        _webController?.loadUrl(urlRequest: URLRequest(url: WebUri(uri)));
+        _searchController.text = uri;
+        _urlFocusNode.unfocus();
+      }
+    });
   }
 
   void _goHome() {
     setState(() {
       _webViewVisible = false;
-      _canGoBack = false;
       _currentUrl = '';
+      _entryUrl = ''; // ✅ Also clear entry URL
       _searchController.clear();
+      _showDashboardLoading = false;
     });
-    // Reset webview to Google so history is cleared
     _webController?.loadUrl(
       urlRequest: URLRequest(url: WebUri('https://www.google.com')),
     );
@@ -83,7 +104,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _domain(String url) {
-    try { return Uri.parse(url).host.replaceFirst('www.', ''); } catch (_) { return url; }
+    try {
+      return Uri.parse(url).host.replaceFirst('www.', '');
+    } catch (_) {
+      return url;
+    }
   }
 
   Future<void> _injectBlobInterceptor(InAppWebViewController c) async {
@@ -109,9 +134,14 @@ class _HomePageState extends State<HomePage> {
       if (!_encReady) throw Exception('Encryption not ready');
       final name = req.suggestedFilename ?? 'downloaded_file';
       setState(() => _status = 'Downloading $name…');
-      final file = req.url.toString().startsWith('blob:')
-          ? await _downloadBlob(req, ctrl)
-          : await _downloadHttp(req);
+      final urlString = req.url.toString();
+      if (urlString.startsWith('blob:')) {
+        await _downloadBlob(req, ctrl);
+      } else if (urlString.startsWith('data:')) {
+        await _downloadDataUrl(req);
+      } else {
+        await _downloadHttp(req);
+      }
       setState(() => _status = '✓ Saved & encrypted');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -127,11 +157,16 @@ class _HomePageState extends State<HomePage> {
           action: SnackBarAction(
             label: 'View',
             textColor: GPColors.accent,
-            onPressed: () {},
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DownloadsPage()),
+            ),
           ),
         ));
       }
-      Future.delayed(const Duration(seconds: 3), () { if (mounted) setState(() => _status = ''); });
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _status = '');
+      });
     } catch (e) {
       setState(() => _status = '❌ Failed');
       if (mounted) {
@@ -143,9 +178,28 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String _getSourceUrl() {
+    // If entryUrl is set, use it. Otherwise extract domain from currentUrl
+    if (_entryUrl.startsWith('http')) return _entryUrl;
+    if (_currentUrl.startsWith('http')) {
+      // Extract just the domain from current URL for context
+      try {
+        final uri = Uri.parse(_currentUrl);
+        return '${uri.scheme}://${uri.host}';
+      } catch (e) {
+        return _currentUrl;
+      }
+    }
+    return 'Unknown Portal';
+  }
+
   Future<dynamic> _downloadBlob(DownloadStartRequest req, InAppWebViewController ctrl) async {
     final blobUrl = req.url.toString();
-    final fileName = req.suggestedFilename ?? 'file';
+    var fileName = req.suggestedFilename?.trim() ?? '';
+    if (fileName.isEmpty) {
+      fileName = 'blob_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    }
+    
     var result = await ctrl.evaluateJavascript(source: """
       (function(){
         if(window.blobCache&&window.blobCache['$blobUrl'])return window.blobCache['$blobUrl'];
@@ -175,26 +229,138 @@ class _HomePageState extends State<HomePage> {
     }
     if (result.toString().startsWith('ERROR:')) throw Exception(result.toString());
     final bytes = Uint8List.fromList(base64Decode(result.toString()));
-    final encrypted = await _encryptionService.encryptFile(bytes);
+    
+    // Use entry URL as sourceUrl (original site user navigated to), abbreviated blob reference as fetchedUrl
+    final pageUrl = _entryUrl.startsWith('http') ? _entryUrl : 'Unknown Portal';
+    final blobRef = 'blob:${Uri.parse(blobUrl).host}';
+    
+    // STEP 1: Create metadata with sourceHash (hash of original blob data)
+    final meta = FileMetadata.create(
+      fileName: fileName,
+      sourceUrl: pageUrl,
+      fetchedUrl: blobRef,
+      originalBytes: bytes,
+    );
+    
+    print('📥 [DOWNLOAD] Blob file: $fileName (${bytes.length} bytes)');
+    print('   • sourceUrl (page): $pageUrl');
+    print('   • fetchedUrl (blob): $blobRef');
+    print('   • sourceHash: ${meta.sourceHash.substring(0, 16)}...');
+    
+    final encrypted = await _encryptionService.encryptFile(bytes, metadata: meta.toJson());
+    return _saveFile(encrypted, fileName);
+  }
+
+  Future<dynamic> _downloadDataUrl(DownloadStartRequest req) async {
+    var fileName = req.suggestedFilename?.trim() ?? '';
+    if (fileName.isEmpty) {
+      fileName = 'data_${DateTime.now().millisecondsSinceEpoch}.pdf';
+    }
+    
+    final urlString = req.url.toString();
+    final commaIndex = urlString.indexOf(',');
+    if (commaIndex < 0) throw Exception('Invalid data URL');
+
+    final header = urlString.substring(0, commaIndex);
+    final payload = urlString.substring(commaIndex + 1);
+    final bytes = header.contains(';base64')
+        ? base64Decode(payload)
+        : Uint8List.fromList(utf8.encode(Uri.decodeFull(payload)));
+
+    // Use entry URL as sourceUrl (original site user navigated to), abbreviated data: reference as fetchedUrl
+    final pageUrl = _entryUrl.startsWith('http') ? _entryUrl : 'Unknown Portal';
+    final dataUrlRef = header.replaceAll(';base64', ''); // header already starts with 'data:'
+    
+    // STEP 1: Create metadata with sourceHash (hash of original data URL content)
+    final meta = FileMetadata.create(
+      fileName: fileName,
+      sourceUrl: pageUrl,
+      fetchedUrl: dataUrlRef,
+      originalBytes: bytes,
+    );
+    
+    print('📥 [DOWNLOAD] Data URL file: $fileName (${bytes.length} bytes)');
+    print('   • sourceUrl (page): $pageUrl');
+    print('   • fetchedUrl (data): $dataUrlRef');
+    print('   • sourceHash: ${meta.sourceHash.substring(0, 16)}...');
+    print('   • entryUrl was: $_entryUrl');
+    
+    final encrypted = await _encryptionService.encryptFile(bytes, metadata: meta.toJson());
     return _saveFile(encrypted, fileName);
   }
 
   Future<dynamic> _downloadHttp(DownloadStartRequest req) async {
-    final fileName = req.suggestedFilename ?? 'file';
+    var fileName = req.suggestedFilename?.trim() ?? '';
+    
+    // If no filename from request, try to get from URL or headers
+    if (fileName.isEmpty) {
+      // First, try to get from URL path
+      final urlPath = req.url.toString().split('?').first.split('/').last;
+      fileName = urlPath.isNotEmpty && urlPath.contains('.') ? urlPath : '';
+      
+      // If still empty, try to get from HTTP headers
+      if (fileName.isEmpty) {
+        try {
+          final client = HttpClient();
+          final r = await client.headUrl(Uri.parse(req.url.toString()));
+          final res = await r.close();
+          final contentDisposition = res.headers.value('content-disposition');
+          if (contentDisposition != null) {
+            final filenamePattern = RegExp(r'filename\*?=(?:"([^"]+)"|([^;\s]+))');
+            final match = filenamePattern.firstMatch(contentDisposition);
+            if (match != null) {
+              fileName = (match.group(1) ?? match.group(2) ?? '').trim();
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not get filename from headers: $e');
+        }
+      }
+      
+      // Last resort fallback
+      if (fileName.isEmpty) {
+        fileName = 'download_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      }
+    }
+    
     final client = HttpClient();
     final r = await client.getUrl(Uri.parse(req.url.toString()));
     final res = await r.close();
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     final bytes = await consolidateHttpClientResponseBytes(res);
     var finalBytes = Uint8List.fromList(bytes);
+    
+    // Use page URL (not download URL) as sourceUrl for context
+    final pageUrl = _entryUrl.startsWith('http') ? _entryUrl : 'Unknown Portal';
+    
+    // STEP 1: Create metadata with sourceHash (hash of original file as received)
+    var meta = FileMetadata.create(
+      fileName: fileName,
+      sourceUrl: pageUrl,
+      fetchedUrl: req.url.toString(),
+      originalBytes: finalBytes,
+    );
+
+    print('📥 [DOWNLOAD] HTTP file: $fileName (${finalBytes.length} bytes)');
+    print('   • sourceUrl (page): $pageUrl');
+    print('   • fetchedUrl (actual): ${req.url.toString()}');
+    print('   • sourceHash: ${meta.sourceHash.substring(0, 16)}...');
+    print('   • timestamp: ${meta.formattedTimestamp}');
+    print('   • fileSize: ${meta.formattedSize}');
+    print('   • entryUrl was: $_entryUrl');
+
+    // Check if password-protected PDF
     if (fileName.toLowerCase().endsWith('.pdf') && PdfUnlocker.isPasswordProtected(finalBytes)) {
+      print('🔒 [DOWNLOAD] PDF is password-protected - will prompt on open');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Password-protected PDF — enter password when viewing.'),
         ));
       }
+      // STEP 2 & 3: Will be handled when user opens the file and enters password
     }
-    final encrypted = await _encryptionService.encryptFile(finalBytes);
+    
+    final encrypted = await _encryptionService.encryptFile(finalBytes, metadata: meta.toJson());
     return _saveFile(encrypted, fileName);
   }
 
@@ -208,14 +374,14 @@ class _HomePageState extends State<HomePage> {
       dir = Directory('${d.path}/GenuPortDownloads');
       if (!await dir.exists()) await dir.create(recursive: true);
     }
-    final finalName = fileName.endsWith('.enc') ? fileName : '$fileName.enc';
-    var path = '${dir.path}/$finalName';
+    final baseName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
+    var path = '${dir.path}/$baseName';
     int i = 1;
     while (File(path).existsSync()) {
-      final parts = fileName.split('.');
+      final parts = baseName.split('.');
       path = parts.length > 1
-          ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}.enc'
-          : '${dir.path}/${fileName}_$i.enc';
+          ? '${dir.path}/${parts.sublist(0, parts.length - 1).join('.')}_$i.${parts.last}'
+          : '${dir.path}/${baseName}_$i';
       i++;
     }
     final file = File(path);
@@ -233,7 +399,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      // Intercept Android back button
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
@@ -262,7 +427,7 @@ class _HomePageState extends State<HomePage> {
           if (_status.isNotEmpty) _buildStatusBar(),
           Expanded(
             child: Stack(children: [
-              // ── WebView — always in tree, hidden when not active ──
+              // ── WebView ──
               Offstage(
                 offstage: !_webViewVisible,
                 child: InAppWebView(
@@ -279,25 +444,66 @@ class _HomePageState extends State<HomePage> {
                   },
                   onLoadStart: (c, url) {
                     final u = url?.toString() ?? '';
-                    // Don't show webview for the initial Google load
-                    if (u == 'https://www.google.com/' || u == 'https://www.google.com') {
-                      if (!_webViewVisible) return;
-                    }
-                    setState(() { _isLoading = true; _loadProgress = 0; _currentUrl = u; });
-                    _updateNav();
+                    setState(() {
+                      _isLoading = true;
+                      _loadProgress = 0;
+                      _currentUrl = u;
+                      _showDashboardLoading = false; // Hide loading overlay
+                    });
                   },
                   onProgressChanged: (c, p) => setState(() => _loadProgress = p / 100),
                   onLoadStop: (c, url) async {
                     await _injectBlobInterceptor(c);
                     final u = url?.toString() ?? '';
-                    setState(() { _isLoading = false; _currentUrl = u; });
-                    _updateNav();
+                    setState(() {
+                      _isLoading = false;
+                      _currentUrl = u;
+                    });
                   },
                   onDownloadStartRequest: (c, req) => _handleDownload(req, c),
                 ),
               ),
-              // ── Dashboard — shown when no URL loaded ──
+              // ── Dashboard ──
               if (!_webViewVisible) _buildDashboard(),
+              
+              // ✅ NEW: Loading overlay when launching from dashboard
+              if (_showDashboardLoading)
+                Container(
+                  color: Colors.black.withOpacity(0.5),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                color: GPColors.primary,
+                                strokeWidth: 3,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Loading',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: GPColors.textPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ]),
           ),
         ]),
@@ -310,7 +516,8 @@ class _HomePageState extends State<HomePage> {
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
       ),
       padding: EdgeInsets.only(
@@ -320,7 +527,6 @@ class _HomePageState extends State<HomePage> {
         bottom: 12,
       ),
       child: Column(children: [
-        // Brand row
         Row(children: [
           if (_webViewVisible)
             IconButton(
@@ -329,7 +535,6 @@ class _HomePageState extends State<HomePage> {
                 final canGoBack = await _webController?.canGoBack() ?? false;
                 if (canGoBack) {
                   await _webController?.goBack();
-                  _updateNav();
                 } else {
                   _goHome();
                 }
@@ -339,7 +544,8 @@ class _HomePageState extends State<HomePage> {
             )
           else
             Container(
-              width: 34, height: 34,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(9),
@@ -355,11 +561,14 @@ class _HomePageState extends State<HomePage> {
                       Expanded(
                         child: Text(
                           _domain(_currentUrl),
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      // Home button when in webview
                       GestureDetector(
                         onTap: _goHome,
                         child: Container(
@@ -374,7 +583,14 @@ class _HomePageState extends State<HomePage> {
                             children: [
                               Icon(Icons.home_rounded, color: Colors.white, size: 14),
                               SizedBox(width: 4),
-                              Text('Home', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                              Text(
+                                'Home',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -384,8 +600,22 @@ class _HomePageState extends State<HomePage> {
                 : const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('GenuPort', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-                      Text('Secure Document Portal', style: TextStyle(color: Colors.white54, fontSize: 10, letterSpacing: 0.3)),
+                      Text(
+                        'GenuPort',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'Secure Document Portal',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 10,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
                     ],
                   ),
           ),
@@ -410,15 +640,16 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 4),
                 Text(
                   _encReady ? 'Encrypted' : 'Initializing…',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ]),
             ),
         ]),
-
         const SizedBox(height: 12),
-
-        // ── Google-style search bar ──
         GestureDetector(
           onTap: () => _urlFocusNode.requestFocus(),
           child: Container(
@@ -475,18 +706,41 @@ class _HomePageState extends State<HomePage> {
     final isDone = _status.startsWith('✓');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      color: isDone ? GPColors.surfaceTint : isErr ? const Color(0xFFFFF3F3) : GPColors.surfaceTint,
+      color: isDone
+          ? GPColors.surfaceTint
+          : isErr
+          ? const Color(0xFFFFF3F3)
+          : GPColors.surfaceTint,
       child: Row(children: [
-        if (isDone) const Icon(Icons.check_circle_rounded, size: 13, color: GPColors.primaryLight)
-        else if (isErr) const Icon(Icons.error_rounded, size: 13, color: GPColors.error)
-        else const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 1.5, color: GPColors.primaryMid)),
+        if (isDone)
+          const Icon(Icons.check_circle_rounded, size: 13, color: GPColors.primaryLight)
+        else if (isErr)
+          const Icon(Icons.error_rounded, size: 13, color: GPColors.error)
+        else
+          const SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: GPColors.primaryMid,
+            ),
+          ),
         const SizedBox(width: 8),
-        Text(_status, style: TextStyle(fontSize: 11, color: isErr ? GPColors.error : GPColors.textSecondary)),
+        Text(
+          _status,
+          style: TextStyle(
+            fontSize: 11,
+            color: isErr ? GPColors.error : GPColors.textSecondary,
+          ),
+        ),
       ]),
     );
   }
 
   Widget _buildDashboard() {
+    final countries = TrustedSitesData.getAllCountries();
+    final countryData = TrustedSitesData.getAllCountriesTrustedSites()[_selectedCountry] ?? {};
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
       child: Column(
@@ -502,60 +756,144 @@ class _HomePageState extends State<HomePage> {
             ),
             child: Row(children: [
               Container(
-                width: 34, height: 34,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: GPColors.primaryLight.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: const Icon(Icons.verified_user_rounded, color: GPColors.primaryLight, size: 17),
+                child: const Icon(
+                  Icons.verified_user_rounded,
+                  color: GPColors.primaryLight,
+                  size: 17,
+                ),
               ),
               const SizedBox(width: 12),
-              const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('AES-256 Encrypted', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: GPColors.primary)),
-                Text('All downloads secured on your device', style: TextStyle(fontSize: 11.5, color: GPColors.textSecondary)),
-              ]),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'AES-256 Encrypted',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: GPColors.primary,
+                    ),
+                  ),
+                  Text(
+                    'All downloads secured on your device',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: GPColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
             ]),
           ),
-
           const SizedBox(height: 24),
-          _label('Banking'),
-          const SizedBox(height: 10),
-          _buildTileGroup([
-            _TileData('HDFC Bank',   Icons.account_balance_rounded, 'https://netbanking.hdfcbank.com'),
-            _TileData('SBI',         Icons.account_balance_rounded, 'https://www.onlinesbi.sbi.in'),
-            _TileData('ICICI Bank',  Icons.account_balance_rounded, 'https://www.icicibank.com/online/accounts'),
-            _TileData('Axis Bank',   Icons.account_balance_rounded, 'https://www.axisbank.com/online-banking'),
-            _TileData('Kotak Bank',  Icons.account_balance_rounded, 'https://netbanking.kotak.com'),
-            _TileData('Credit Card', Icons.credit_card_rounded,     'https://www.google.com/search?q=credit+card+statement+download'),
-          ]),
 
-          const SizedBox(height: 22),
-          _label('Government & Identity'),
-          const SizedBox(height: 10),
-          _buildTileGroup([
-            _TileData('DigiLocker',   Icons.badge_rounded,           'https://digilocker.gov.in'),
-            _TileData('Aadhaar',      Icons.fingerprint_rounded,     'https://myaadhaar.uidai.gov.in'),
-            _TileData('Income Tax',   Icons.receipt_long_rounded,    'https://www.incometax.gov.in'),
-            _TileData('PAN Services', Icons.credit_score_rounded,    'https://www.tin.nsdl.com'),
-            _TileData('Parivahan',    Icons.directions_car_rounded,  'https://parivahan.gov.in'),
-            _TileData('GST Portal',   Icons.home_work_rounded,       'https://www.gst.gov.in'),
-          ]),
+          // ✅ UPDATED: Better styled country dropdown
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Country'.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: GPColors.textMuted,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: GPColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: GPColors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: GPColors.primary.withOpacity(0.04),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedCountry,
+                    isExpanded: true,
+                    menuMaxHeight: 350,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                    items: countries.map((country) {
+                      return DropdownMenuItem<String>(
+                        value: country,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.public_rounded,
+                              size: 16,
+                              color: GPColors.primaryMid,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              country,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: GPColors.textPrimary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _selectedCountry = value);
+                      }
+                    },
+                    icon: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Icon(
+                        Icons.arrow_drop_down_rounded,
+                        color: GPColors.primaryMid,
+                        size: 24,
+                      ),
+                    ),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: GPColors.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
 
-          const SizedBox(height: 22),
-          _label('Finance & Credit'),
-          const SizedBox(height: 10),
-          _buildTileGroup([
-            _TileData('CIBIL Score', Icons.credit_score_rounded,    'https://www.cibil.com'),
-            _TileData('EPFO / PF',   Icons.savings_rounded,         'https://passbook.epfindia.gov.in'),
-            _TileData('NSE / BSE',   Icons.trending_up_rounded,     'https://www.nseindia.com'),
-            _TileData('LIC',         Icons.health_and_safety_rounded,'https://licindia.in'),
-          ]),
+          // Dynamic sections
+          ...countryData.entries.map((entry) {
+            final categoryName = entry.key;
+            final sites = entry.value;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _label(categoryName),
+                const SizedBox(height: 10),
+                _buildTileGroup(sites),
+                const SizedBox(height: 22),
+              ],
+            );
+          }),
         ],
       ),
     );
   }
 
-  Widget _buildTileGroup(List<_TileData> tiles) {
+  Widget _buildTileGroup(List<TrustedSite> tiles) {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -575,15 +913,27 @@ class _HomePageState extends State<HomePage> {
               color: GPColors.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: GPColors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: GPColors.primary.withOpacity(0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(t.icon, color: GPColors.primaryMid, size: 22),
                 const SizedBox(height: 7),
-                Text(t.name,
+                Text(
+                  t.name,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: GPColors.textPrimary),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: GPColors.textPrimary,
+                  ),
                 ),
               ],
             ),
@@ -595,18 +945,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _label(String text) => Text(
     text,
-    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: GPColors.textMuted, letterSpacing: 0.4),
+    style: const TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+      color: GPColors.textMuted,
+      letterSpacing: 0.4,
+    ),
   );
-
-  void _updateNav() async {
-    final back = await _webController?.canGoBack() ?? false;
-    if (mounted) setState(() => _canGoBack = back);
-  }
-}
-
-class _TileData {
-  final String name;
-  final IconData icon;
-  final String url;
-  const _TileData(this.name, this.icon, this.url);
 }

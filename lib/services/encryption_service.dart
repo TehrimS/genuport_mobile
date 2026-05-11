@@ -108,7 +108,18 @@ class EncryptionService {
       meta = jsonDecode(utf8.decode(metaBytes)) as Map<String, dynamic>;
       print('📖 [METADATA] Extracted metadata from encrypted file:');
       print('   • Metadata length: $metaLen bytes');
-      print('   • Metadata content: $meta');
+      print('   • fileName: ${meta['fileName'] ?? 'N/A'}');
+      print('   • sourceUrl: ${meta['sourceUrl'] ?? 'N/A'}');
+      print('   • fetchedUrl: ${meta['fetchedUrl'] ?? 'N/A'}');
+      print('   • timestamp: ${meta['timestamp'] ?? 'N/A'}');
+      print('   • fileSize: ${meta['fileSize'] ?? 'N/A'} bytes');
+      print('   • sourceHash: ${(meta['sourceHash'] as String?)?.substring(0, 16) ?? 'N/A'}...');
+      if (meta['unlockedHash'] != null) {
+        print('   • unlockedHash: ${(meta['unlockedHash'] as String).substring(0, 16)}...');
+      }
+      if (meta['unlockMethod'] != null) {
+        print('   • unlockMethod: ${meta['unlockMethod']}');
+      }
     } catch (e) {
       print('⚠️  [METADATA] Failed to extract metadata: $e');
     }
@@ -158,6 +169,37 @@ class EncryptionService {
   }
 
   String generateFileHash(Uint8List fileBytes) => sha256.convert(fileBytes).toString();
+
+  /// STEP 4: Encrypt a file that was password-protected and has been unlocked
+  /// Stores both sourceHash (original protected bytes) and unlockedHash in metadata
+  Future<Uint8List> encryptUnlockedFile(
+    Uint8List unlockedBytes, {
+    required Map<String, dynamic> metadata,
+  }) async {
+    if (_encryptionKey == null || _iv == null) await initialize();
+
+    final encrypter = encrypt_pkg.Encrypter(
+      encrypt_pkg.AES(_encryptionKey!, mode: encrypt_pkg.AESMode.cbc),
+    );
+    final encrypted = encrypter.encryptBytes(unlockedBytes, iv: _iv!);
+
+    // Serialize metadata with both sourceHash and unlockedHash
+    final metaJson = utf8.encode(jsonEncode(metadata));
+    final metaLen = metaJson.length;
+
+    final metaLenBytes = Uint8List(4)
+      ..[0] = (metaLen >> 24) & 0xFF
+      ..[1] = (metaLen >> 16) & 0xFF
+      ..[2] = (metaLen >> 8) & 0xFF
+      ..[3] = metaLen & 0xFF;
+
+    return Uint8List.fromList([
+      ..._header,
+      ...metaLenBytes,
+      ...metaJson,
+      ...encrypted.bytes,
+    ]);
+  }
 
   Future<void> resetEncryption() async {
     await _secureStorage.delete(key: _keyStorageKey);
